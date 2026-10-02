@@ -5,30 +5,58 @@ using UnityEngine.AI;
 namespace Nightwall
 {
     /// <summary>
-    /// Navigates toward the HQ. When blocked by (or adjacent to) a wall or the HQ, it stops and
-    /// attacks the nearest damageable target in range until the path clears.
+    /// Objective-driven enemy: it always heads for the HQ. Player-built walls are NavMesh
+    /// obstacles (carving), so the agent reroutes around them automatically — the maze, and the
+    /// "longer path = more survival time" trade-off, emerge from pathfinding rather than scripted
+    /// lanes. The enemy attacks a structure ONLY when it is genuinely walled out: when no complete
+    /// path to the HQ exists it breaches the nearest blocker toward the base to reopen a route.
+    /// Locomotion is delegated to <see cref="NavAgentMotor"/>.
     /// </summary>
     [RequireComponent(typeof(NavMeshAgent))]
+    [RequireComponent(typeof(NavAgentMotor))]
     [RequireComponent(typeof(Health))]
     public class Enemy : MonoBehaviour
     {
-        [SerializeField] float attackRange = 3f;
-        [SerializeField] float attackDamage = 10f;
+        [Header("Objective (the base)")]
+        [SerializeField] float hqAttackRange = 3f;
+        [SerializeField] float hqDamage = 10f;
+
+        [Header("Breaching (only when no path exists)")]
+        [Tooltip("When fully walled out, the nearest blocking structure toward the HQ within this radius is attacked.")]
+        [SerializeField] float breachRange = 2.5f;
+        [SerializeField] float breachDamage = 15f;
         [SerializeField] float attackInterval = 1f;
+        [Tooltip("Layers treated as breachable structures (walls/towers/HQ). Set to the Building layer.")]
+        [SerializeField] LayerMask structureMask = ~0;
+
         [SerializeField] float repathInterval = 0.5f;
 
         public event Action<Enemy> Died;
 
         NavMeshAgent _agent;
+        NavAgentMotor _motor;
         Health _health;
         Transform _hq;
-        float _attackTimer;
+        Health _hqHealth;
         float _repathTimer;
+        float _attackTimer;
+        readonly Collider[] _hits = new Collider[8];
 
         void Awake()
         {
             _agent = GetComponent<NavMeshAgent>();
+            _motor = GetComponent<NavAgentMotor>();
+            if (_motor == null) _motor = gameObject.AddComponent<NavAgentMotor>();
             _health = GetComponent<Health>();
+
+            // Default the breach mask to the Building layer if it was left as "Everything",
+            // so the enemy only ever chews on structures — never units or the ground.
+            if (structureMask.value == ~0)
+            {
+                int building = LayerMask.NameToLayer("Building");
+                if (building >= 0) structureMask = 1 << building;
+            }
+
             _health.Died += _ =>
             {
                 Died?.Invoke(this);
@@ -36,49 +64,97 @@ namespace Nightwall
             };
         }
 
-        public void Init(Transform hq) => _hq = hq;
+        public void Init(Transform hq)
+        {
+            _hq = hq;
+            _hqHealth = hq != null ? hq.GetComponent<Health>() : null;
+        }
+
+        void Start()
+        {
+            _motor.WarpToNavMesh();
+            if (_hq != null) _motor.SetDestination(_hq.position);
+        }
 
         void Update()
         {
             if (_hq == null) return;
 
+            // At the base? Attack it.
+            if ((_hq.position - transform.position).sqrMagnitude <= hqAttackRange * hqAttackRange)
+            {
+                _motor.Stop();
+                TryAttack(_hqHealth, hqDamage);
+                return;
+            }
+
+            // Keep the objective current; carving walls make the path reroute itself.
             _repathTimer -= Time.deltaTime;
             if (_repathTimer <= 0f)
             {
                 _repathTimer = repathInterval;
-                if (_agent.isOnNavMesh) _agent.SetDestination(_hq.position);
+                _motor.SetDestination(_hq.position);
             }
 
-            _attackTimer -= Time.deltaTime;
-            Health target = FindTargetInRange();
-            if (target != null)
+            // Only break walls when there is NO complete route to the base.
+            if (IsWalledOut())
             {
-                if (_agent.isOnNavMesh) _agent.isStopped = true;
-                if (_attackTimer <= 0f)
+                Health blocker = FindBlockerTowardHq();
+                if (blocker != null)
                 {
-                    _attackTimer = attackInterval;
-                    target.TakeDamage(attackDamage);
+                    _motor.Stop();
+                    TryAttack(blocker, breachDamage);
+                    return;
                 }
             }
-            else if (_agent.isOnNavMesh)
-            {
-                _agent.isStopped = false;
-            }
+
+            _motor.Resume();
         }
 
-        Health FindTargetInRange()
+        /// <summary>True when the agent cannot reach the HQ by any route (fully enclosed).</summary>
+        bool IsWalledOut()
         {
+            if (!_agent.isOnNavMesh || _agent.pathPending) return false;
+            return _agent.pathStatus != NavMeshPathStatus.PathComplete;
+        }
+
+        /// <summary>Nearest live structure within breach range that lies ahead toward the HQ, or null.</summary>
+        Health FindBlockerTowardHq()
+        {
+            Vector3 pos = transform.position;
+            Vector3 toHq = _hq.position - pos; toHq.y = 0f;
+            bool haveDir = toHq.sqrMagnitude > 0.0001f;
+            if (haveDir) toHq.Normalize();
+
+            int n = Physics.OverlapSphereNonAlloc(pos, breachRange, _hits, structureMask, QueryTriggerInteraction.Ignore);
             Health best = null;
-            float bestSq = attackRange * attackRange;
-            foreach (var col in Physics.OverlapSphere(transform.position, attackRange))
+            float bestSqr = float.MaxValue;
+            for (int i = 0; i < n; i++)
             {
-                Health h = col.GetComponentInParent<Health>();
-                if (h == null || h == _health || h.IsDead) continue;
-                if (h.GetComponent<Enemy>() != null) continue; // ignore other enemies
-                float d = (h.transform.position - transform.position).sqrMagnitude;
-                if (d <= bestSq) { bestSq = d; best = h; }
+                Collider c = _hits[i];
+                if (c == null) continue;
+                Health h = c.GetComponentInParent<Health>();
+                if (h == null || h.IsDead || h == _health) continue;
+                if (h.GetComponent<Enemy>() != null) continue;
+
+                // Direction to the nearest point on the structure (handles wide walls correctly).
+                Vector3 to = c.ClosestPoint(pos) - pos; to.y = 0f;
+                float d = to.sqrMagnitude;
+                if (haveDir && d > 0.0001f && Vector3.Dot(toHq, to.normalized) < 0f) continue; // only ahead
+                if (d < bestSqr) { bestSqr = d; best = h; }
             }
             return best;
+        }
+
+        void TryAttack(Health target, float damage)
+        {
+            if (target == null || target.IsDead) return;
+            _attackTimer -= Time.deltaTime;
+            if (_attackTimer <= 0f)
+            {
+                _attackTimer = attackInterval;
+                target.TakeDamage(damage);
+            }
         }
     }
 }
