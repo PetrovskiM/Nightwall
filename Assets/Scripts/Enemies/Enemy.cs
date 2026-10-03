@@ -100,18 +100,13 @@ namespace Nightwall
                 return;
             }
 
-            // Re-evaluate reachability periodically, but only re-issue the path when the current
-            // one is missing or incomplete. Recomputing an already-good path every tick nudged the
-            // corner points and made agents twitch at walls; the agent auto-repaths on carve
-            // changes on its own, so a stable complete path is left untouched.
+            // Keep the objective current; carving walls make the path reroute itself.
             _repathTimer -= Time.deltaTime;
             if (_repathTimer <= 0f)
             {
                 _repathTimer = repathInterval;
+                _motor.SetDestination(_hq.position);
                 _walledOut = ComputeWalledOut();
-                if (!_agent.pathPending &&
-                    (!_agent.hasPath || _agent.pathStatus != NavMeshPathStatus.PathComplete))
-                    _motor.SetDestination(_hq.position);
             }
 
             // Only break walls when there is genuinely NO complete route to the base.
