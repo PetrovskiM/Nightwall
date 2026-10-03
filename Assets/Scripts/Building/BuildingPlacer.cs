@@ -28,6 +28,12 @@ namespace Nightwall
 
         public bool IsActive { get; private set; }
 
+        /// <summary>The prefabs this placer can build, in hotkey/UI order. Read-only view for UI.</summary>
+        public IReadOnlyList<GameObject> Buildables => buildables;
+
+        /// <summary>Index of the currently selected buildable (valid only while <see cref="IsActive"/>).</summary>
+        public int SelectedIndex => _index;
+
         int _index;
         float _yaw;
         GameObject _ghost;
@@ -59,12 +65,14 @@ namespace Nightwall
 
             Keyboard kb = Keyboard.current;
             if (kb != null && kb.bKey.wasPressedThisFrame) Toggle();
-            if (!IsActive) return;
+            if (!IsActive) { HandleGateInput(); return; }
 
             if (kb != null)
             {
                 if (kb.digit1Key.wasPressedThisFrame) SelectIndex(0);
                 if (kb.digit2Key.wasPressedThisFrame) SelectIndex(1);
+                if (kb.digit3Key.wasPressedThisFrame) SelectIndex(2);
+                if (kb.digit4Key.wasPressedThisFrame) SelectIndex(3);
                 if (kb.rKey.wasPressedThisFrame) _yaw += 90f;
                 if (kb.escapeKey.wasPressedThisFrame) { Toggle(); return; }
             }
@@ -92,6 +100,20 @@ namespace Nightwall
         {
             if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
                 TryRemove(Mouse.current.position.ReadValue());
+        }
+
+        /// <summary>
+        /// Left-click on a placed gate (while not in build mode) opens or closes it. Lets the player
+        /// manage gates during the day without entering placement mode.
+        /// </summary>
+        void HandleGateInput()
+        {
+            if (_cam == null) return;
+            if (Mouse.current == null || !Mouse.current.leftButton.wasPressedThisFrame) return;
+
+            Ray ray = _cam.ScreenPointToRay(Mouse.current.position.ReadValue());
+            if (Physics.Raycast(ray, out RaycastHit hit, 500f, buildingMask))
+                hit.collider.GetComponentInParent<Gate>()?.Toggle();
         }
 
         void HandleTouch()

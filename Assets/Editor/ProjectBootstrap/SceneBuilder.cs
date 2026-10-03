@@ -51,17 +51,22 @@ namespace ProjectBootstrap
             Material hqMat = MakeMat("HQ", new Color(0.25f, 0.5f, 0.95f));
             Material enemyMat = MakeMat("Enemy", new Color(0.9f, 0.25f, 0.25f));
             Material wallMat = MakeMat("Wall", new Color(0.55f, 0.55f, 0.6f));
+            Material reinforcedMat = MakeMat("ReinforcedWall", new Color(0.32f, 0.36f, 0.46f));
+            Material gateMat = MakeMat("Gate", new Color(0.6f, 0.45f, 0.2f));
             Material trapMat = MakeMat("Trap", new Color(0.85f, 0.7f, 0.2f));
             Material ghostMat = MakeTransparentMat("Ghost", new Color(0.2f, 0.9f, 0.2f, 0.5f));
             Material gridMat = MakeUnlitTransparentMat("GridLines", new Color(0.55f, 0.75f, 1f, 0.14f));
 
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
             GameObject wallPrefab = BuildWallPrefab(wallMat);
+            GameObject reinforcedPrefab = BuildReinforcedWallPrefab(reinforcedMat);
+            GameObject gatePrefab = BuildGatePrefab(gateMat);
             GameObject trapPrefab = BuildTrapPrefab(trapMat);
 
             AssetDatabase.SaveAssets();
 
-            BuildScene(map, groundMat, hqMat, enemyPrefab, wallPrefab, trapPrefab, ghostMat, gridMat);
+            BuildScene(map, groundMat, hqMat, enemyPrefab, wallPrefab, reinforcedPrefab, gatePrefab,
+                trapPrefab, ghostMat, gridMat);
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -130,13 +135,56 @@ namespace ProjectBootstrap
             Paint(root, body);
 
             var health = root.AddComponent<Health>();
-            SetFloat(health, "maxHealth", 200f);
+            SetFloat(health, "maxHealth", 120f);
             root.AddComponent<Buildable>();
+            var structure = root.AddComponent<DefensiveStructure>();
+            SetString(structure, "displayName", "Wall");
+            SetInt(structure, "cost", 10);
             // Carve slightly past the cell so two diagonally-placed walls overlap at their shared
             // corner and seal the pinch — otherwise the horde slips through the diagonal gap.
             AddCarvingObstacle(root, new Vector3(1.1f, 1.6f, 1.1f));
 
             return SavePrefab(root, "Wall");
+        }
+
+        static GameObject BuildReinforcedWallPrefab(Material body)
+        {
+            var root = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            root.name = "ReinforcedWall";
+            // A touch taller/stockier so it reads as the heavy-duty wall at phone scale.
+            root.transform.localScale = new Vector3(1f, 2.0f, 1f);
+            SetLayerRecursive(root, _building);
+            Paint(root, body);
+
+            var health = root.AddComponent<Health>();
+            SetFloat(health, "maxHealth", 500f);
+            root.AddComponent<Buildable>();
+            var structure = root.AddComponent<DefensiveStructure>();
+            SetString(structure, "displayName", "Reinforced");
+            SetInt(structure, "cost", 40);
+            AddCarvingObstacle(root, new Vector3(1.1f, 2.0f, 1.1f));
+
+            return SavePrefab(root, "ReinforcedWall");
+        }
+
+        static GameObject BuildGatePrefab(Material body)
+        {
+            var root = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            root.name = "Gate";
+            root.transform.localScale = new Vector3(1f, 1.4f, 1f);
+            SetLayerRecursive(root, _building);
+            Paint(root, body);
+
+            var health = root.AddComponent<Health>();
+            SetFloat(health, "maxHealth", 200f);
+            root.AddComponent<Buildable>();
+            // Carve like a wall while closed; Gate lifts the obstacle (and sinks the visual) when open.
+            AddCarvingObstacle(root, new Vector3(1.1f, 1.4f, 1.1f));
+            var gate = root.AddComponent<Gate>();
+            SetString(gate, "displayName", "Gate");
+            SetInt(gate, "cost", 25);
+
+            return SavePrefab(root, "Gate");
         }
 
         static GameObject BuildTrapPrefab(Material body)
@@ -153,6 +201,9 @@ namespace ProjectBootstrap
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 100f);
             root.AddComponent<Buildable>();
+            var structure = root.AddComponent<DefensiveStructure>();
+            SetString(structure, "displayName", "Trap");
+            SetInt(structure, "cost", 15);
             root.AddComponent<Trap>();
 
             return SavePrefab(root, "Trap");
@@ -161,8 +212,8 @@ namespace ProjectBootstrap
         // ---------- Scene ----------
 
         static void BuildScene(MapConfig map, Material groundMat, Material hqMat,
-            GameObject enemyPrefab, GameObject wallPrefab, GameObject trapPrefab, Material ghostMat,
-            Material gridMat)
+            GameObject enemyPrefab, GameObject wallPrefab, GameObject reinforcedPrefab,
+            GameObject gatePrefab, GameObject trapPrefab, Material ghostMat, Material gridMat)
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -279,6 +330,7 @@ namespace ProjectBootstrap
             var gameManager = systems.AddComponent<GameManager>();
             var waveSpawner = systems.AddComponent<WaveSpawner>();
             var placer = systems.AddComponent<BuildingPlacer>();
+            var buildBar = systems.AddComponent<BuildBar>();
             systems.AddComponent<DevHud>();
 
             // ----- Wire references via SerializedObject (robust for private [SerializeField]) -----
@@ -290,10 +342,13 @@ namespace ProjectBootstrap
             SetArray(waveSpawner, "spawnPoints", spawns);
             SetObject(waveSpawner, "levelConfig", MakeLevelConfig(spawns.Length));
 
-            SetArray(placer, "buildables", new Object[] { wallPrefab, trapPrefab });
+            SetArray(placer, "buildables",
+                new Object[] { wallPrefab, reinforcedPrefab, gatePrefab, trapPrefab });
             SetMask(placer, "groundMask", _ground);
             SetMask(placer, "buildingMask", _building);
             SetObject(placer, "ghostMaterial", ghostMat);
+
+            SetObject(buildBar, "placer", placer);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -494,6 +549,20 @@ namespace ProjectBootstrap
         {
             var so = new SerializedObject(comp);
             so.FindProperty(prop).floatValue = value;
+            so.ApplyModifiedProperties();
+        }
+
+        static void SetInt(Object comp, string prop, int value)
+        {
+            var so = new SerializedObject(comp);
+            so.FindProperty(prop).intValue = value;
+            so.ApplyModifiedProperties();
+        }
+
+        static void SetString(Object comp, string prop, string value)
+        {
+            var so = new SerializedObject(comp);
+            so.FindProperty(prop).stringValue = value;
             so.ApplyModifiedProperties();
         }
 
