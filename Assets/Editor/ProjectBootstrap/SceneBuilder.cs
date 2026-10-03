@@ -53,7 +53,7 @@ namespace ProjectBootstrap
             Material wallMat = MakeMat("Wall", new Color(0.55f, 0.55f, 0.6f));
             Material trapMat = MakeMat("Trap", new Color(0.85f, 0.7f, 0.2f));
             Material ghostMat = MakeTransparentMat("Ghost", new Color(0.2f, 0.9f, 0.2f, 0.5f));
-            Material gridMat = MakeUnlitTransparentMat("GridLines", new Color(1f, 1f, 1f, 0.14f));
+            Material gridMat = MakeUnlitTransparentMat("GridLines", new Color(0.6f, 0.85f, 1f, 0.45f));
 
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
             GameObject wallPrefab = BuildWallPrefab(wallMat);
@@ -270,7 +270,6 @@ namespace ProjectBootstrap
             SetMask(placer, "groundMask", _ground);
             SetMask(placer, "buildingMask", _building);
             SetObject(placer, "ghostMaterial", ghostMat);
-            SetObject(placer, "gridOverlay", overlay);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -349,6 +348,7 @@ namespace ProjectBootstrap
             }
             mat.SetFloat("_Surface", 1f);       // 1 = Transparent
             mat.SetFloat("_Blend", 0f);         // Alpha blend
+            mat.SetFloat("_Cull", 0f);          // draw both faces
             mat.SetOverrideTag("RenderType", "Transparent");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");

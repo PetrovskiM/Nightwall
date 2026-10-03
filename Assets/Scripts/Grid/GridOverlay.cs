@@ -3,15 +3,17 @@ using UnityEngine;
 namespace Nightwall
 {
     /// <summary>
-    /// Draws the build grid as thin lines in the Game view — Unity gizmos (the ones
-    /// <see cref="GridSystem"/> draws) only appear in the Scene view. Builds a single
-    /// line-topology mesh from the <see cref="MapConfig"/> once, so it costs one draw call.
-    /// Hidden by default; <see cref="BuildingPlacer"/> shows it while in build mode.
+    /// Draws the build grid as thin flat quads in the Game view — Unity gizmos (the ones
+    /// <see cref="GridSystem"/> draws) only appear in the Scene view. Builds a single mesh from the
+    /// <see cref="MapConfig"/> once, so it costs one draw call. Quads (not line topology) give a
+    /// controllable, reliably-rendered width.
     /// </summary>
     [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
     public class GridOverlay : MonoBehaviour
     {
         [SerializeField] MapConfig config;
+        [Tooltip("Width of each grid line in world units.")]
+        [SerializeField] float lineWidth = 0.05f;
         [Tooltip("Height above the ground plane to avoid z-fighting.")]
         [SerializeField] float yOffset = 0.02f;
 
@@ -30,10 +32,9 @@ namespace Nightwall
             }
 
             GetComponent<MeshFilter>().mesh = BuildMesh();
-            SetVisible(false);
         }
 
-        /// <summary>Toggles the overlay's visibility (called by the building system).</summary>
+        /// <summary>Toggles the overlay's visibility.</summary>
         public void SetVisible(bool visible)
         {
             if (_renderer != null) _renderer.enabled = visible;
@@ -46,33 +47,45 @@ namespace Nightwall
             float cs = config.CellSize;
             Vector2 min = config.WorldMin;
             float y = config.Origin.y + yOffset;
+            float hw = lineWidth * 0.5f;
 
-            int vCount = (w + 1) * 2 + (h + 1) * 2;
-            var verts = new Vector3[vCount];
-            var indices = new int[vCount];
-            int vi = 0;
+            float xMin = min.x, xMax = min.x + w * cs;
+            float zMin = min.y, zMax = min.y + h * cs;
+
+            int lines = (w + 1) + (h + 1);
+            var verts = new Vector3[lines * 4];
+            var tris = new int[lines * 6];
+            int vi = 0, ti = 0;
 
             for (int x = 0; x <= w; x++)
             {
                 float wx = min.x + x * cs;
-                verts[vi]     = new Vector3(wx, y, min.y);
-                verts[vi + 1] = new Vector3(wx, y, min.y + h * cs);
-                vi += 2;
+                AddQuad(verts, tris, ref vi, ref ti,
+                    new Vector3(wx - hw, y, zMin), new Vector3(wx + hw, y, zMin),
+                    new Vector3(wx + hw, y, zMax), new Vector3(wx - hw, y, zMax));
             }
             for (int z = 0; z <= h; z++)
             {
                 float wz = min.y + z * cs;
-                verts[vi]     = new Vector3(min.x, y, wz);
-                verts[vi + 1] = new Vector3(min.x + w * cs, y, wz);
-                vi += 2;
+                AddQuad(verts, tris, ref vi, ref ti,
+                    new Vector3(xMin, y, wz - hw), new Vector3(xMax, y, wz - hw),
+                    new Vector3(xMax, y, wz + hw), new Vector3(xMin, y, wz + hw));
             }
-            for (int i = 0; i < vCount; i++) indices[i] = i;
 
             var mesh = new Mesh { name = "GridOverlay" };
             mesh.vertices = verts;
-            mesh.SetIndices(indices, MeshTopology.Lines, 0);
+            mesh.triangles = tris;
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        static void AddQuad(Vector3[] v, int[] t, ref int vi, ref int ti,
+            Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        {
+            int s = vi;
+            v[vi++] = a; v[vi++] = b; v[vi++] = c; v[vi++] = d;
+            t[ti++] = s;     t[ti++] = s + 2; t[ti++] = s + 1;
+            t[ti++] = s;     t[ti++] = s + 3; t[ti++] = s + 2;
         }
     }
 }
