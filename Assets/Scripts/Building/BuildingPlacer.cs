@@ -23,6 +23,7 @@ namespace Nightwall
         [SerializeField] LayerMask groundMask = ~0;
         [SerializeField] LayerMask buildingMask;
         [SerializeField] Material ghostMaterial;
+        [SerializeField] GridOverlay gridOverlay;
         [SerializeField] Color validTint   = new Color(0.2f, 0.9f, 0.2f, 0.5f);
         [SerializeField] Color invalidTint = new Color(1f,   0.3f, 0.3f, 0.5f);
 
@@ -68,8 +69,10 @@ namespace Nightwall
             else
             {
                 UpdateGhost();
+                // Held button paints across cells: after a cell is placed it becomes occupied,
+                // so _validPlacement flips false there and only new empty cells get walls.
                 if (_ghost != null && _validPlacement &&
-                    Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+                    Mouse.current != null && Mouse.current.leftButton.isPressed)
                     Place();
             }
         }
@@ -116,6 +119,7 @@ namespace Nightwall
         public void Toggle()
         {
             IsActive = !IsActive;
+            if (gridOverlay != null) gridOverlay.SetVisible(IsActive);
             if (IsActive) BuildGhost();
             else ClearGhost();
         }

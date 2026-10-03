@@ -53,6 +53,7 @@ namespace ProjectBootstrap
             Material wallMat = MakeMat("Wall", new Color(0.55f, 0.55f, 0.6f));
             Material trapMat = MakeMat("Trap", new Color(0.85f, 0.7f, 0.2f));
             Material ghostMat = MakeTransparentMat("Ghost", new Color(0.2f, 0.9f, 0.2f, 0.5f));
+            Material gridMat = MakeUnlitTransparentMat("GridLines", new Color(1f, 1f, 1f, 0.14f));
 
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
             GameObject wallPrefab = BuildWallPrefab(wallMat);
@@ -60,7 +61,7 @@ namespace ProjectBootstrap
 
             AssetDatabase.SaveAssets();
 
-            BuildScene(map, groundMat, hqMat, enemyPrefab, wallPrefab, trapPrefab, ghostMat);
+            BuildScene(map, groundMat, hqMat, enemyPrefab, wallPrefab, trapPrefab, ghostMat, gridMat);
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -151,7 +152,8 @@ namespace ProjectBootstrap
         // ---------- Scene ----------
 
         static void BuildScene(MapConfig map, Material groundMat, Material hqMat,
-            GameObject enemyPrefab, GameObject wallPrefab, GameObject trapPrefab, Material ghostMat)
+            GameObject enemyPrefab, GameObject wallPrefab, GameObject trapPrefab, Material ghostMat,
+            Material gridMat)
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -197,6 +199,17 @@ namespace ProjectBootstrap
             var gridGo = new GameObject("GridSystem");
             var grid = gridGo.AddComponent<GridSystem>();
             SetObject(grid, "config", map);
+
+            // Visible in-game grid overlay (gizmos only show in the Scene view).
+            var overlayGo = new GameObject("GridOverlay");
+            overlayGo.transform.position = Vector3.zero;
+            overlayGo.AddComponent<MeshFilter>();
+            var overlayRenderer = overlayGo.AddComponent<MeshRenderer>();
+            overlayRenderer.sharedMaterial = gridMat;
+            overlayRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            overlayRenderer.receiveShadows = false;
+            var overlay = overlayGo.AddComponent<GridOverlay>();
+            SetObject(overlay, "config", map);
 
             // Camera rig: Main Camera (Brain) + an orthographic iso CinemachineCamera.
             var camGo = new GameObject("Main Camera");
@@ -257,6 +270,7 @@ namespace ProjectBootstrap
             SetMask(placer, "groundMask", _ground);
             SetMask(placer, "buildingMask", _building);
             SetObject(placer, "ghostMaterial", ghostMat);
+            SetObject(placer, "gridOverlay", overlay);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -316,6 +330,28 @@ namespace ProjectBootstrap
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.SetShaderPassEnabled("ShadowCaster", false);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", color);
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        static Material MakeUnlitTransparentMat(string name, Color color)
+        {
+            string path = $"{MatDir}/{name}.mat";
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                var shader = Shader.Find("Universal Render Pipeline/Unlit");
+                if (shader == null) shader = Shader.Find("Unlit/Color");
+                mat = new Material(shader) { name = name };
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            mat.SetFloat("_Surface", 1f);       // 1 = Transparent
+            mat.SetFloat("_Blend", 0f);         // Alpha blend
+            mat.SetOverrideTag("RenderType", "Transparent");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
             if (mat.HasProperty("_Color")) mat.SetColor("_Color", color);
             EditorUtility.SetDirty(mat);
