@@ -40,6 +40,8 @@ namespace Nightwall
         Health _hqHealth;
         float _repathTimer;
         float _attackTimer;
+        bool _walledOut;
+        NavMeshPath _path;
         readonly Collider[] _hits = new Collider[8];
 
         void Awake()
@@ -80,6 +82,14 @@ namespace Nightwall
         {
             if (_hq == null) return;
 
+            // A freshly-placed wall can carve the navmesh out from under the agent; warp it back
+            // on so it keeps pathing instead of freezing (SetDestination no-ops while off-mesh).
+            if (!_agent.isOnNavMesh)
+            {
+                _motor.WarpToNavMesh();
+                if (!_agent.isOnNavMesh) return;
+            }
+
             // At the base? Attack it.
             if ((_hq.position - transform.position).sqrMagnitude <= hqAttackRange * hqAttackRange)
             {
@@ -94,10 +104,11 @@ namespace Nightwall
             {
                 _repathTimer = repathInterval;
                 _motor.SetDestination(_hq.position);
+                _walledOut = ComputeWalledOut();
             }
 
-            // Only break walls when there is NO complete route to the base.
-            if (IsWalledOut())
+            // Only break walls when there is genuinely NO complete route to the base.
+            if (_walledOut)
             {
                 Health blocker = FindBlockerTowardHq();
                 if (blocker != null)
@@ -111,11 +122,22 @@ namespace Nightwall
             _motor.Resume();
         }
 
-        /// <summary>True when the agent cannot reach the HQ by any route (fully enclosed).</summary>
-        bool IsWalledOut()
+        /// <summary>
+        /// Authoritative "is the base reachable?" test. Computes a fresh path to the nearest
+        /// navmesh point by the HQ — the agent's own <c>pathStatus</c> is stale for a frame or two
+        /// right after a wall carves, which made the enemy stop and breach instead of rerouting.
+        /// </summary>
+        bool ComputeWalledOut()
         {
-            if (!_agent.isOnNavMesh || _agent.pathPending) return false;
-            return _agent.pathStatus != NavMeshPathStatus.PathComplete;
+            if (!_agent.isOnNavMesh) return false;
+            _path ??= new NavMeshPath();
+
+            Vector3 target = _hq.position;
+            if (NavMesh.SamplePosition(_hq.position, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                target = hit.position;
+
+            _agent.CalculatePath(target, _path);
+            return _path.status != NavMeshPathStatus.PathComplete;
         }
 
         /// <summary>Nearest live structure within breach range that lies ahead toward the HQ, or null.</summary>

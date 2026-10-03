@@ -34,7 +34,9 @@ namespace Nightwall
             }
 
             GetComponent<MeshFilter>().mesh = BuildMesh();
-            SetVisible(false);
+            // Start hidden. Set the renderer directly — SetVisible(false) here would no-op because
+            // _visible already defaults to false, leaving the renderer on.
+            if (_renderer != null) _renderer.enabled = false;
         }
 
         // Self-wire rather than hold a serialized reference the binary scene can drop.

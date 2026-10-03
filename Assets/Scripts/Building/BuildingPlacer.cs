@@ -39,6 +39,8 @@ namespace Nightwall
         Vector2 _touchDownPos;
         const float TapMoveTolerance = 20f;
 
+        readonly Collider[] _enemyHits = new Collider[8];
+
         void Awake() => _cam = Camera.main;
 
         void Update()
@@ -175,7 +177,8 @@ namespace Nightwall
             {
                 Vector2Int cell = grid.WorldToCell(worldPos.Value);
                 _ghost.transform.position = grid.CellToWorld(cell);
-                _validPlacement = grid.CanPlace(cell, footprint);
+                _validPlacement = grid.CanPlace(cell, footprint) &&
+                                  !CellHasEnemy(_ghost.transform.position);
             }
             else
             {
@@ -195,8 +198,9 @@ namespace Nightwall
             if (grid != null)
             {
                 Vector2Int cell = grid.WorldToCell(_ghost.transform.position);
-                if (!grid.CanPlace(cell, footprint)) return;   // guard against a stale valid flag
-                grid.Occupy(cell, footprint);                  // claim the cell now, no 1-frame gap
+                if (!grid.CanPlace(cell, footprint)) return;        // guard against a stale valid flag
+                if (CellHasEnemy(_ghost.transform.position)) return; // never trap/overlap an enemy
+                grid.Occupy(cell, footprint);                       // claim the cell now, no 1-frame gap
             }
 
             Instantiate(buildables[_index], _ghost.transform.position, _ghost.transform.rotation)
@@ -232,6 +236,19 @@ namespace Nightwall
         {
             var b = buildables[_index] != null ? buildables[_index].GetComponent<Buildable>() : null;
             return b != null ? b.Footprint : new Vector2Int(1, 1);
+        }
+
+        /// <summary>True when a live enemy is standing on the target cell — can't build on it.</summary>
+        bool CellHasEnemy(Vector3 cellCenter)
+        {
+            float cs = GridSystem.Instance != null ? GridSystem.Instance.CellSize : 1f;
+            var half = new Vector3(cs * 0.45f, 1.5f, cs * 0.45f);
+            int n = Physics.OverlapBoxNonAlloc(cellCenter + Vector3.up, half, _enemyHits,
+                Quaternion.identity, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+                if (_enemyHits[i] != null && _enemyHits[i].GetComponentInParent<Enemy>() != null)
+                    return true;
+            return false;
         }
 
         void Tint(Color color)
