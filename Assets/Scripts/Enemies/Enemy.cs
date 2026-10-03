@@ -41,7 +41,7 @@ namespace Nightwall
         float _repathTimer;
         float _attackTimer;
         bool _walledOut;
-        NavMeshPath _path;
+        Vector3 _hqNavPoint;
         readonly Collider[] _hits = new Collider[8];
 
         void Awake()
@@ -75,7 +75,14 @@ namespace Nightwall
         void Start()
         {
             _motor.WarpToNavMesh();
-            if (_hq != null) _motor.SetDestination(_hq.position);
+
+            // Head for an on-mesh point by the HQ, not the HQ centre (which sits inside a blocker
+            // and is off-mesh — a bad destination makes partial-path following misbehave).
+            _hqNavPoint = _hq != null ? _hq.position : transform.position;
+            if (_hq != null && NavMesh.SamplePosition(_hq.position, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                _hqNavPoint = hit.position;
+
+            _motor.SetDestination(_hqNavPoint);
             // Desync repaths so the whole horde doesn't recompute on the same frame.
             _repathTimer = UnityEngine.Random.Range(0f, repathInterval);
         }
@@ -105,8 +112,8 @@ namespace Nightwall
             if (_repathTimer <= 0f)
             {
                 _repathTimer = repathInterval;
-                _motor.SetDestination(_hq.position);
-                _walledOut = ComputeWalledOut();
+                _walledOut = ComputeWalledOut();       // judge the current, settled path first
+                _motor.SetDestination(_hqNavPoint);    // then request a fresh one
             }
 
             // Only break walls when there is genuinely NO complete route to the base.
@@ -125,27 +132,21 @@ namespace Nightwall
         }
 
         /// <summary>
-        /// "Is the base unreachable?" — computed from a fresh path, since the agent's own
-        /// <c>pathStatus</c> is stale for a frame or two right after a wall carves. A partial path
-        /// is NOT treated as walled out on its own: the HQ centre sits inside a blocker (always
-        /// off-mesh, so paths to it are partial), and one route being blocked doesn't mean every
-        /// route is. The enemy is only walled out when the farthest point it can actually reach is
-        /// still well short of the HQ — otherwise it keeps routing toward whatever gap exists.
+        /// "Is the base unreachable?" judged from the agent's OWN path — the one it actually
+        /// follows — so the breach decision can't disagree with where the agent is really going.
+        /// A complete path means not walled out. A partial path only counts as walled out when its
+        /// farthest point still lands well short of the HQ; a partial path that gets close (e.g.
+        /// right up to the HQ blocker) is fine and the enemy keeps closing in to attack.
         /// </summary>
         bool ComputeWalledOut()
         {
-            if (!_agent.isOnNavMesh) return false;
-            _path ??= new NavMeshPath();
+            if (!_agent.isOnNavMesh || _agent.pathPending) return _walledOut; // keep last while pending
+            if (_agent.pathStatus == NavMeshPathStatus.PathComplete) return false;
 
-            Vector3 target = _hq.position;
-            if (NavMesh.SamplePosition(_hq.position, out NavMeshHit hit, 6f, NavMesh.AllAreas))
-                target = hit.position;
+            Vector3[] corners = _agent.path.corners;
+            if (corners.Length == 0) return true;
 
-            _agent.CalculatePath(target, _path);
-            if (_path.status == NavMeshPathStatus.PathComplete) return false;
-            if (_path.corners.Length == 0) return true;
-
-            Vector3 end = _path.corners[_path.corners.Length - 1];
+            Vector3 end = corners[corners.Length - 1];
             float margin = hqAttackRange + 2f;
             var flatEnd = new Vector2(end.x, end.z);
             var flatHq = new Vector2(_hq.position.x, _hq.position.z);
