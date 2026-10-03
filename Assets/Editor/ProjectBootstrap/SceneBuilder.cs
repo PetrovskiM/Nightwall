@@ -245,23 +245,33 @@ namespace ProjectBootstrap
             var camCtrl = vcamGo.AddComponent<IsoCameraController>();
             SetObject(camCtrl, "map", map);
 
-            // Spawn points at the four map edges (inset slightly so they sit on the NavMesh).
+            // Entrances around the whole perimeter — four edge midpoints and four corners — so the
+            // horde can be made to attack from any combination of directions (inset so they sit on
+            // the NavMesh). Each carries a SpawnPoint component; waves pick which ones are active.
             var spawnRoot = new GameObject("SpawnPoints");
             const float inset = 2f;
-            Vector3[] spots =
+            float ex = worldMax.x - inset, nx = worldMin.x + inset;
+            float ez = worldMax.y - inset, sz = worldMin.y + inset;
+            (Vector3 pos, Color color, string name)[] spots =
             {
-                new Vector3(map.Origin.x, 0f, worldMax.y - inset),
-                new Vector3(worldMax.x - inset, 0f, map.Origin.z),
-                new Vector3(map.Origin.x, 0f, worldMin.y + inset),
-                new Vector3(worldMin.x + inset, 0f, map.Origin.z),
+                (new Vector3(map.Origin.x, 0f, ez), new Color(0.90f, 0.30f, 0.20f), "N"),
+                (new Vector3(ex, 0f, ez),           new Color(0.95f, 0.60f, 0.20f), "NE"),
+                (new Vector3(ex, 0f, map.Origin.z), new Color(0.90f, 0.85f, 0.25f), "E"),
+                (new Vector3(ex, 0f, sz),           new Color(0.40f, 0.85f, 0.30f), "SE"),
+                (new Vector3(map.Origin.x, 0f, sz), new Color(0.30f, 0.80f, 0.80f), "S"),
+                (new Vector3(nx, 0f, sz),           new Color(0.35f, 0.55f, 0.95f), "SW"),
+                (new Vector3(nx, 0f, map.Origin.z), new Color(0.60f, 0.40f, 0.95f), "W"),
+                (new Vector3(nx, 0f, ez),           new Color(0.95f, 0.45f, 0.80f), "NW"),
             };
-            var spawns = new Transform[spots.Length];
+            var spawns = new SpawnPoint[spots.Length];
             for (int i = 0; i < spots.Length; i++)
             {
-                var sp = new GameObject($"Spawn {i + 1}");
+                var sp = new GameObject($"Spawn {i} ({spots[i].name})");
                 sp.transform.SetParent(spawnRoot.transform, false);
-                sp.transform.position = spots[i];
-                spawns[i] = sp.transform;
+                sp.transform.position = spots[i].pos;
+                var comp = sp.AddComponent<SpawnPoint>();
+                SetColor(comp, "gizmoColor", spots[i].color);
+                spawns[i] = comp;
             }
 
             // Game systems (no SelectionManager — the player never commands units).
@@ -278,6 +288,7 @@ namespace ProjectBootstrap
             SetObject(waveSpawner, "enemyPrefab", enemyPrefab);
             SetObject(waveSpawner, "hq", hq.transform);
             SetArray(waveSpawner, "spawnPoints", spawns);
+            SetObject(waveSpawner, "levelConfig", MakeLevelConfig(spawns.Length));
 
             SetArray(placer, "buildables", new Object[] { wallPrefab, trapPrefab });
             SetMask(placer, "groundMask", _ground);
@@ -418,6 +429,65 @@ namespace ProjectBootstrap
             }
             Debug.LogWarning($"[SceneBuilder] No free layer slot for '{name}'; using Default.");
             return 0;
+        }
+
+        // LevelConfig lives under Resources (like MapConfig) so WaveSpawner can recover it at
+        // runtime even if the binary-saved scene drops the serialized reference.
+        const string LevelConfigPath = ConfigDir + "/LevelConfig.asset";
+
+        /// <summary>
+        /// Author a handful of escalating nights, then leave the rest to the procedural fallback.
+        /// Each inner tuple is (spawnPointIndex, count); indices match the perimeter order built
+        /// above (0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW).
+        /// </summary>
+        static LevelConfig MakeLevelConfig(int spawnCount)
+        {
+            var cfg = AssetDatabase.LoadAssetAtPath<LevelConfig>(LevelConfigPath);
+            if (cfg == null)
+            {
+                cfg = ScriptableObject.CreateInstance<LevelConfig>();
+                AssetDatabase.CreateAsset(cfg, LevelConfigPath);
+            }
+
+            // (interval, [(index,count), ...]) per authored night.
+            var waves = new (float interval, (int idx, int count)[] groups)[]
+            {
+                (0.60f, new[] { (0, 6) }),                              // night 1: one entrance
+                (0.55f, new[] { (0, 4), (4, 4) }),                     // night 2: N + S pincer
+                (0.50f, new[] { (0, 5), (2, 4), (6, 4) }),             // night 3: N + E + W
+                (0.45f, new[] { (0, 4), (2, 4), (4, 4), (6, 4) }),     // night 4: all four edges
+            };
+
+            var so = new SerializedObject(cfg);
+            var wavesProp = so.FindProperty("waves");
+            wavesProp.arraySize = waves.Length;
+            for (int w = 0; w < waves.Length; w++)
+            {
+                var wp = wavesProp.GetArrayElementAtIndex(w);
+                wp.FindPropertyRelative("spawnInterval").floatValue = waves[w].interval;
+                var gp = wp.FindPropertyRelative("groups");
+                var groups = waves[w].groups;
+                gp.arraySize = groups.Length;
+                for (int g = 0; g < groups.Length; g++)
+                {
+                    var ep = gp.GetArrayElementAtIndex(g);
+                    ep.FindPropertyRelative("spawnPointIndex").intValue = Mathf.Clamp(groups[g].idx, 0, spawnCount - 1);
+                    ep.FindPropertyRelative("count").intValue = groups[g].count;
+                }
+            }
+            so.FindProperty("proceduralBaseCount").intValue = 8;
+            so.FindProperty("proceduralCountPerWave").intValue = 4;
+            so.FindProperty("proceduralSpawnInterval").floatValue = 0.45f;
+            so.ApplyModifiedProperties();
+            EditorUtility.SetDirty(cfg);
+            return cfg;
+        }
+
+        static void SetColor(Object comp, string prop, Color value)
+        {
+            var so = new SerializedObject(comp);
+            so.FindProperty(prop).colorValue = value;
+            so.ApplyModifiedProperties();
         }
 
         static void SetFloat(Object comp, string prop, float value)
