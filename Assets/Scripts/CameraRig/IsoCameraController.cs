@@ -5,12 +5,19 @@ using UnityEngine.InputSystem;
 namespace Nightwall
 {
     /// <summary>
-    /// Pans a Cinemachine camera across the ground plane (WASD / arrows / screen-edge) and
-    /// zooms by changing the orthographic size. Attach to the CinemachineCamera object.
+    /// Pans an orthographic isometric Cinemachine camera across the ground plane
+    /// (WASD / arrows / screen-edge) and zooms by changing the orthographic size. Pan limits are
+    /// taken from the <see cref="MapConfig"/> (plus a margin) so the view always matches the map
+    /// without hand-tuned bounds. Attach to the CinemachineCamera object.
     /// </summary>
     [RequireComponent(typeof(CinemachineCamera))]
-    public class RTSCameraController : MonoBehaviour
+    public class IsoCameraController : MonoBehaviour
     {
+        [Header("Map bounds source")]
+        [SerializeField] MapConfig map;
+        [Tooltip("Extra world units the camera may pan beyond the map edge.")]
+        [SerializeField] float boundsMargin = 6f;
+
         [Header("Pan")]
         [SerializeField] float panSpeed = 22f;
         [SerializeField] bool edgePan = true;
@@ -19,23 +26,33 @@ namespace Nightwall
         [Header("Zoom")]
         [SerializeField] float zoomSpeed = 5f;
         [SerializeField] float minZoom = 6f;
-        [SerializeField] float maxZoom = 30f;
-
-        [Header("Bounds (world XZ)")]
-        [SerializeField] Vector2 boundsMin = new Vector2(-40, -40);
-        [SerializeField] Vector2 boundsMax = new Vector2(40, 40);
+        [SerializeField] float maxZoom = 40f;
 
         CinemachineCamera _vcam;
         Vector3 _right;
         Vector3 _forward;
+        Vector2 _boundsMin;
+        Vector2 _boundsMax;
 
         void Awake()
         {
             _vcam = GetComponent<CinemachineCamera>();
+
             // Build a ground-plane movement basis from the camera's yaw so panning feels screen-relative.
             Quaternion yawOnly = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
             _right = yawOnly * Vector3.right;
             _forward = yawOnly * Vector3.forward;
+
+            if (map != null)
+            {
+                _boundsMin = map.WorldMin - Vector2.one * boundsMargin;
+                _boundsMax = map.WorldMax + Vector2.one * boundsMargin;
+            }
+            else
+            {
+                _boundsMin = new Vector2(-40f, -40f);
+                _boundsMax = new Vector2(40f, 40f);
+            }
         }
 
         void Update()
@@ -82,8 +99,8 @@ namespace Nightwall
 
         Vector3 Clamp(Vector3 p)
         {
-            p.x = Mathf.Clamp(p.x, boundsMin.x, boundsMax.x);
-            p.z = Mathf.Clamp(p.z, boundsMin.y, boundsMax.y);
+            p.x = Mathf.Clamp(p.x, _boundsMin.x, _boundsMax.x);
+            p.z = Mathf.Clamp(p.z, _boundsMin.y, _boundsMax.y);
             return p;
         }
     }

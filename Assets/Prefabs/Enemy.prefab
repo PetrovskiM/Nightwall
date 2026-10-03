@@ -13,7 +13,9 @@ GameObject:
   - component: {fileID: 7866796099976383761}
   - component: {fileID: 3938380409184438292}
   - component: {fileID: 1235037653424375491}
+  - component: {fileID: 4374291504891840234}
   - component: {fileID: 4735993315566246815}
+  - component: {fileID: 4996342513722722174}
   - component: {fileID: 918098355163796316}
   m_Layer: 0
   m_Name: Enemy
@@ -135,6 +137,33 @@ NavMeshAgent:
   m_BaseOffset: 1
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!54 &4374291504891840234
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7197097058034847139}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 0
+  m_IsKinematic: 1
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!114 &4735993315566246815
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -148,6 +177,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   maxHealth: 40
+--- !u!114 &4996342513722722174
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7197097058034847139}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1b41ac5dc42342ed9e991727b29c1972, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  moveSpeed: 3.5
 --- !u!114 &918098355163796316
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -160,7 +202,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8ce7904fd350643d8ad85fb1eaf5a0a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  attackRange: 3
-  attackDamage: 10
+  hqAttackRange: 3
+  hqDamage: 10
+  breachRange: 2.5
+  breachDamage: 15
   attackInterval: 1
+  structureMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
   repathInterval: 0.5

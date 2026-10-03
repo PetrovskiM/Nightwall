@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.IO;
 using Nightwall;
 using Unity.AI.Navigation;
@@ -11,10 +10,12 @@ using UnityEngine.AI;
 namespace ProjectBootstrap
 {
     /// <summary>
-    /// Headless scaffold builder: creates placeholder materials + prefabs (unit, enemy, wall,
-    /// tower) and a playable Nightwall scene (iso Cinemachine rig, ground + baked NavMesh, HQ,
-    /// spawn points, wired game systems, a few starter units). Primitives are intentional
-    /// placeholders — swap in real low-poly art later.
+    /// Headless scaffold builder for the Nightwall prototype. Creates a <see cref="MapConfig"/>
+    /// ScriptableObject (the single source of truth for map size), placeholder materials and
+    /// prefabs (enemy, wall, trap), and a playable scene: an orthographic iso Cinemachine rig, a
+    /// flat ground sized to the map with a baked NavMesh, a central HQ core, edge spawn points, a
+    /// grid system and the wired game-state / wave / building systems. There are NO player-controlled
+    /// units — defence is purely architectural. Primitives are intentional placeholders.
     ///
     /// Run headless with:
     ///   -executeMethod ProjectBootstrap.SceneBuilder.Build
@@ -24,73 +25,68 @@ namespace ProjectBootstrap
         const string MatDir = "Assets/Art/Materials";
         const string PrefabDir = "Assets/Prefabs";
         const string SceneDir = "Assets/Scenes";
+        const string ConfigDir = "Assets/ScriptableObjects";
         const string ScenePath = SceneDir + "/Nightwall.unity";
+        const string MapConfigPath = ConfigDir + "/MapConfig.asset";
 
-        static int _ground, _building, _selectable;
+        static int _ground, _building;
 
+        [MenuItem("Nightwall/Rebuild Prototype Scene")]
         public static void Build()
         {
             EnsureFolder("Assets/Art");
             EnsureFolder(MatDir);
             EnsureFolder(PrefabDir);
             EnsureFolder(SceneDir);
+            EnsureFolder(ConfigDir);
 
             _ground = EnsureLayer("Ground");
             _building = EnsureLayer("Building");
-            _selectable = EnsureLayer("Selectable");
+
+            MapConfig map = MakeMapConfig();
 
             Material groundMat = MakeMat("Ground", new Color(0.16f, 0.18f, 0.22f));
             Material hqMat = MakeMat("HQ", new Color(0.25f, 0.5f, 0.95f));
-            Material unitMat = MakeMat("Unit", new Color(0.3f, 0.8f, 0.4f));
             Material enemyMat = MakeMat("Enemy", new Color(0.9f, 0.25f, 0.25f));
             Material wallMat = MakeMat("Wall", new Color(0.55f, 0.55f, 0.6f));
-            Material towerMat = MakeMat("Tower", new Color(0.95f, 0.6f, 0.2f));
-            Material ringMat = MakeMat("SelectRing", new Color(0.9f, 1f, 0.4f));
+            Material trapMat = MakeMat("Trap", new Color(0.85f, 0.7f, 0.2f));
             Material ghostMat = MakeMat("Ghost", new Color(0.4f, 0.9f, 1f));
 
-            GameObject unitPrefab = BuildUnitPrefab(unitMat, ringMat);
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
             GameObject wallPrefab = BuildWallPrefab(wallMat);
-            GameObject towerPrefab = BuildTowerPrefab(towerMat);
+            GameObject trapPrefab = BuildTrapPrefab(trapMat);
 
             AssetDatabase.SaveAssets();
 
-            BuildScene(groundMat, hqMat, unitPrefab, enemyPrefab, wallPrefab, towerPrefab, ghostMat);
+            BuildScene(map, groundMat, hqMat, enemyPrefab, wallPrefab, trapPrefab, ghostMat);
 
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
             Debug.Log("[SceneBuilder] Done.");
-            EditorApplication.Exit(0);
+            if (Application.isBatchMode) EditorApplication.Exit(0);
+        }
+
+        // ---------- Config ----------
+
+        static MapConfig MakeMapConfig()
+        {
+            var map = AssetDatabase.LoadAssetAtPath<MapConfig>(MapConfigPath);
+            if (map == null)
+            {
+                map = ScriptableObject.CreateInstance<MapConfig>();
+                AssetDatabase.CreateAsset(map, MapConfigPath);
+            }
+            var so = new SerializedObject(map);
+            so.FindProperty("width").intValue = 60;
+            so.FindProperty("height").intValue = 60;
+            so.FindProperty("cellSize").floatValue = 1f;
+            so.FindProperty("origin").vector3Value = Vector3.zero;
+            so.ApplyModifiedProperties();
+            EditorUtility.SetDirty(map);
+            return map;
         }
 
         // ---------- Prefabs ----------
-
-        static GameObject BuildUnitPrefab(Material body, Material ring)
-        {
-            var root = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            root.name = "Unit";
-            root.transform.localScale = new Vector3(0.8f, 0.9f, 0.8f);
-            SetLayerRecursive(root, _selectable);
-            Paint(root, body);
-
-            var agent = root.AddComponent<NavMeshAgent>();
-            agent.radius = 0.4f; agent.height = 1.8f; agent.speed = 5f; agent.angularSpeed = 720f; agent.acceleration = 30f;
-
-            var health = root.AddComponent<Health>();
-            SetFloat(health, "maxHealth", 80f);
-            root.AddComponent<UnitController>();
-            var selectable = root.AddComponent<Selectable>();
-
-            // Selection ring at the unit's feet, hidden by default.
-            var ringGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            ringGo.name = "SelectionRing";
-            Object.DestroyImmediate(ringGo.GetComponent<Collider>());
-            ringGo.transform.SetParent(root.transform, false);
-            ringGo.transform.localScale = new Vector3(1.6f, 0.02f, 1.6f);
-            ringGo.transform.localPosition = new Vector3(0f, -0.55f, 0f);
-            Paint(ringGo, ring);
-            SetObject(selectable, "selectionIndicator", ringGo);
-
-            return SavePrefab(root, "Unit");
-        }
 
         static GameObject BuildEnemyPrefab(Material body)
         {
@@ -102,8 +98,14 @@ namespace ProjectBootstrap
             var agent = root.AddComponent<NavMeshAgent>();
             agent.radius = 0.4f; agent.height = 1.8f; agent.speed = 3.5f; agent.angularSpeed = 720f; agent.acceleration = 20f;
 
+            // Kinematic body so the NavMesh-driven agent still raises trigger events (traps).
+            var rb = root.AddComponent<Rigidbody>();
+            rb.isKinematic = true;
+            rb.useGravity = false;
+
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 40f);
+            root.AddComponent<NavAgentMotor>();
             root.AddComponent<Enemy>();
 
             return SavePrefab(root, "Enemy");
@@ -125,29 +127,35 @@ namespace ProjectBootstrap
             return SavePrefab(root, "Wall");
         }
 
-        static GameObject BuildTowerPrefab(Material body)
+        static GameObject BuildTrapPrefab(Material body)
         {
-            var root = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            root.name = "Tower";
-            root.transform.localScale = new Vector3(1f, 1.2f, 1f);
-            SetLayerRecursive(root, _building);
+            var root = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            root.name = "Trap";
+            // A flat floor tile; left on the Default layer so the breach AI (Building mask) ignores it.
+            root.transform.localScale = new Vector3(1f, 0.1f, 1f);
             Paint(root, body);
 
-            var health = root.AddComponent<Health>();
-            SetFloat(health, "maxHealth", 150f);
-            var buildable = root.AddComponent<Buildable>();
-            SetVector2Int(buildable, "footprint", new Vector2Int(1, 1));
-            AddCarvingObstacle(root, new Vector3(1f, 2.4f, 1f));
+            var col = root.GetComponent<BoxCollider>();
+            col.isTrigger = true;
 
-            return SavePrefab(root, "Tower");
+            var health = root.AddComponent<Health>();
+            SetFloat(health, "maxHealth", 100f);
+            root.AddComponent<Buildable>();
+            root.AddComponent<Trap>();
+
+            return SavePrefab(root, "Trap");
         }
 
         // ---------- Scene ----------
 
-        static void BuildScene(Material groundMat, Material hqMat, GameObject unitPrefab,
-            GameObject enemyPrefab, GameObject wallPrefab, GameObject towerPrefab, Material ghostMat)
+        static void BuildScene(MapConfig map, Material groundMat, Material hqMat,
+            GameObject enemyPrefab, GameObject wallPrefab, GameObject trapPrefab, Material ghostMat)
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+            Vector2 worldSize = map.WorldSize;
+            Vector2 worldMin = map.WorldMin;
+            Vector2 worldMax = map.WorldMax;
 
             // Sun
             var lightGo = new GameObject("Directional Light");
@@ -158,21 +166,22 @@ namespace ProjectBootstrap
             light.shadows = LightShadows.Soft;
             lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
 
-            // Ground (80x80), with a baked NavMeshSurface
+            // Flat ground sized to the map (a Unity plane is 10x10 units at scale 1).
             var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
             ground.name = "Ground";
-            ground.transform.localScale = new Vector3(8f, 1f, 8f);
+            ground.transform.position = map.Origin;
+            ground.transform.localScale = new Vector3(worldSize.x / 10f, 1f, worldSize.y / 10f);
             ground.layer = _ground;
             Paint(ground, groundMat);
             var surface = ground.AddComponent<NavMeshSurface>();
             surface.collectObjects = CollectObjects.All;
             surface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
 
-            // HQ at center — blocks the bake so agents path to its edge.
+            // HQ core at the map centre — blocks the bake so agents path to its edge.
             var hq = GameObject.CreatePrimitive(PrimitiveType.Cube);
             hq.name = "HQ";
             hq.transform.localScale = new Vector3(4f, 3f, 4f);
-            hq.transform.position = new Vector3(0f, 1.5f, 0f);
+            hq.transform.position = map.Origin + new Vector3(0f, 1.5f, 0f);
             hq.layer = _building;
             Paint(hq, hqMat);
             var hqHealth = hq.AddComponent<Health>();
@@ -181,6 +190,11 @@ namespace ProjectBootstrap
 
             // Bake now that the static blockers (ground + HQ) exist.
             surface.BuildNavMesh();
+
+            // Grid system (spatial source of truth) referencing the MapConfig.
+            var gridGo = new GameObject("GridSystem");
+            var grid = gridGo.AddComponent<GridSystem>();
+            SetObject(grid, "config", map);
 
             // Camera rig: Main Camera (Brain) + an orthographic iso CinemachineCamera.
             var camGo = new GameObject("Main Camera");
@@ -192,8 +206,8 @@ namespace ProjectBootstrap
             camGo.AddComponent<CinemachineBrain>();
 
             var vcamGo = new GameObject("IsoCamera");
-            vcamGo.transform.position = new Vector3(-28f, 32f, -28f);
-            vcamGo.transform.rotation = Quaternion.LookRotation(Vector3.zero - vcamGo.transform.position, Vector3.up);
+            vcamGo.transform.position = map.Origin + new Vector3(-28f, 32f, -28f);
+            vcamGo.transform.rotation = Quaternion.LookRotation(map.Origin - vcamGo.transform.position, Vector3.up);
             var vcam = vcamGo.AddComponent<CinemachineCamera>();
             LensSettings lens = vcam.Lens;
             lens.ModeOverride = LensSettings.OverrideModes.Orthographic;
@@ -201,16 +215,20 @@ namespace ProjectBootstrap
             lens.NearClipPlane = 0.1f;
             lens.FarClipPlane = 500f;
             vcam.Lens = lens;
-            vcamGo.AddComponent<RTSCameraController>();
+            var camCtrl = vcamGo.AddComponent<IsoCameraController>();
+            SetObject(camCtrl, "map", map);
 
-            // Spawn points at the map edges.
+            // Spawn points at the four map edges (inset slightly so they sit on the NavMesh).
             var spawnRoot = new GameObject("SpawnPoints");
-            var spawns = new Transform[4];
+            const float inset = 2f;
             Vector3[] spots =
             {
-                new Vector3(0f, 0f, 38f), new Vector3(38f, 0f, 0f),
-                new Vector3(0f, 0f, -38f), new Vector3(-38f, 0f, 0f),
+                new Vector3(map.Origin.x, 0f, worldMax.y - inset),
+                new Vector3(worldMax.x - inset, 0f, map.Origin.z),
+                new Vector3(map.Origin.x, 0f, worldMin.y + inset),
+                new Vector3(worldMin.x + inset, 0f, map.Origin.z),
             };
+            var spawns = new Transform[spots.Length];
             for (int i = 0; i < spots.Length; i++)
             {
                 var sp = new GameObject($"Spawn {i + 1}");
@@ -219,22 +237,11 @@ namespace ProjectBootstrap
                 spawns[i] = sp.transform;
             }
 
-            // Game systems
+            // Game systems (no SelectionManager — the player never commands units).
             var systems = new GameObject("GameSystems");
             var gameManager = systems.AddComponent<GameManager>();
             var waveSpawner = systems.AddComponent<WaveSpawner>();
             var placer = systems.AddComponent<BuildingPlacer>();
-            var selection = systems.AddComponent<SelectionManager>();
-
-            // Starter units near the HQ.
-            var unitsRoot = new GameObject("Units");
-            Vector3[] unitSpots = { new Vector3(6f, 0f, 0f), new Vector3(8f, 0f, 1.5f), new Vector3(7f, 0f, -1.5f) };
-            foreach (var pos in unitSpots)
-            {
-                var u = (GameObject)PrefabUtility.InstantiatePrefab(unitPrefab);
-                u.transform.SetParent(unitsRoot.transform, false);
-                u.transform.position = pos;
-            }
 
             // ----- Wire references via SerializedObject (robust for private [SerializeField]) -----
             SetObject(gameManager, "hq", hqComp);
@@ -244,11 +251,7 @@ namespace ProjectBootstrap
             SetObject(waveSpawner, "hq", hq.transform);
             SetArray(waveSpawner, "spawnPoints", spawns);
 
-            SetMask(selection, "selectableMask", _selectable);
-            SetMask(selection, "groundMask", _ground);
-            SetObject(selection, "buildingPlacer", placer);
-
-            SetArray(placer, "buildables", new Object[] { wallPrefab, towerPrefab });
+            SetArray(placer, "buildables", new Object[] { wallPrefab, trapPrefab });
             SetMask(placer, "groundMask", _ground);
             SetObject(placer, "ghostMaterial", ghostMat);
 
@@ -344,13 +347,6 @@ namespace ProjectBootstrap
         {
             var so = new SerializedObject(comp);
             so.FindProperty(prop).floatValue = value;
-            so.ApplyModifiedProperties();
-        }
-
-        static void SetVector2Int(Object comp, string prop, Vector2Int value)
-        {
-            var so = new SerializedObject(comp);
-            so.FindProperty(prop).vector2IntValue = value;
             so.ApplyModifiedProperties();
         }
 
