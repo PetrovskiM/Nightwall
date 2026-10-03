@@ -53,7 +53,7 @@ namespace ProjectBootstrap
             Material wallMat = MakeMat("Wall", new Color(0.55f, 0.55f, 0.6f));
             Material trapMat = MakeMat("Trap", new Color(0.85f, 0.7f, 0.2f));
             Material ghostMat = MakeTransparentMat("Ghost", new Color(0.2f, 0.9f, 0.2f, 0.5f));
-            Material gridMat = MakeUnlitTransparentMat("GridLines", new Color(0.6f, 0.85f, 1f, 0.45f));
+            Material gridMat = MakeUnlitTransparentMat("GridLines", new Color(0.55f, 0.75f, 1f, 0.14f));
 
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
             GameObject wallPrefab = BuildWallPrefab(wallMat);
@@ -125,7 +125,9 @@ namespace ProjectBootstrap
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 200f);
             root.AddComponent<Buildable>();
-            AddCarvingObstacle(root, new Vector3(1f, 1.6f, 1f));
+            // Carve slightly past the cell so two diagonally-placed walls overlap at their shared
+            // corner and seal the pinch — otherwise the horde slips through the diagonal gap.
+            AddCarvingObstacle(root, new Vector3(1.1f, 1.6f, 1.1f));
 
             return SavePrefab(root, "Wall");
         }

@@ -13,11 +13,13 @@ namespace Nightwall
     {
         [SerializeField] MapConfig config;
         [Tooltip("Width of each grid line in world units.")]
-        [SerializeField] float lineWidth = 0.05f;
+        [SerializeField] float lineWidth = 0.04f;
         [Tooltip("Height above the ground plane to avoid z-fighting.")]
         [SerializeField] float yOffset = 0.02f;
 
         MeshRenderer _renderer;
+        BuildingPlacer _placer;
+        bool _visible;
 
         void Awake()
         {
@@ -32,11 +34,19 @@ namespace Nightwall
             }
 
             GetComponent<MeshFilter>().mesh = BuildMesh();
+            SetVisible(false);
         }
 
-        /// <summary>Toggles the overlay's visibility.</summary>
+        // Self-wire rather than hold a serialized reference the binary scene can drop.
+        void Start() => _placer = FindFirstObjectByType<BuildingPlacer>();
+
+        void Update() => SetVisible(_placer != null && _placer.IsActive);
+
+        /// <summary>Shows the overlay only while something is building.</summary>
         public void SetVisible(bool visible)
         {
+            if (visible == _visible) return;
+            _visible = visible;
             if (_renderer != null) _renderer.enabled = visible;
         }
 
