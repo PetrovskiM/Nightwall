@@ -50,7 +50,7 @@ namespace ProjectBootstrap
             Material enemyMat = MakeMat("Enemy", new Color(0.9f, 0.25f, 0.25f));
             Material wallMat = MakeMat("Wall", new Color(0.55f, 0.55f, 0.6f));
             Material trapMat = MakeMat("Trap", new Color(0.85f, 0.7f, 0.2f));
-            Material ghostMat = MakeMat("Ghost", new Color(0.4f, 0.9f, 1f));
+            Material ghostMat = MakeTransparentMat("Ghost", new Color(0.2f, 0.9f, 0.2f, 0.5f));
 
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
             GameObject wallPrefab = BuildWallPrefab(wallMat);
@@ -253,6 +253,7 @@ namespace ProjectBootstrap
 
             SetArray(placer, "buildables", new Object[] { wallPrefab, trapPrefab });
             SetMask(placer, "groundMask", _ground);
+            SetMask(placer, "buildingMask", _building);
             SetObject(placer, "ghostMaterial", ghostMat);
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -288,6 +289,31 @@ namespace ProjectBootstrap
                 mat = new Material(shader) { name = name };
                 AssetDatabase.CreateAsset(mat, path);
             }
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", color);
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        static Material MakeTransparentMat(string name, Color color)
+        {
+            string path = $"{MatDir}/{name}.mat";
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                var shader = Shader.Find("Universal Render Pipeline/Lit");
+                if (shader == null) shader = Shader.Find("Standard");
+                mat = new Material(shader) { name = name };
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            // URP transparent surface setup.
+            mat.SetFloat("_Surface", 1f);       // 1 = Transparent
+            mat.SetFloat("_Blend", 0f);         // Alpha blend
+            mat.SetFloat("_AlphaClip", 0f);
+            mat.SetOverrideTag("RenderType", "Transparent");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.SetShaderPassEnabled("ShadowCaster", false);
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
             if (mat.HasProperty("_Color")) mat.SetColor("_Color", color);
             EditorUtility.SetDirty(mat);

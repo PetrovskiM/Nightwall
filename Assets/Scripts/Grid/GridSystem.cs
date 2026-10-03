@@ -116,7 +116,11 @@ namespace Nightwall
         public bool CanPlace(Vector2Int anchor, Vector2Int footprint)
         {
             foreach (Vector2Int c in Cells(anchor, footprint))
-                if (!InBounds(c) || IsOccupied(c)) return false;
+            {
+                if (!InBounds(c)) return false;
+                CellState s = GetState(c);
+                if (s != CellState.Walkable) return false;
+            }
             return true;
         }
 

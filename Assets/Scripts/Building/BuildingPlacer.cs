@@ -5,18 +5,25 @@ using UnityEngine.InputSystem;
 namespace Nightwall
 {
     /// <summary>
-    /// Build mode: B toggles it, 1/2 pick a structure, R rotates, left-click/tap places on the
-    /// grid-snapped ground point, Esc/two-finger-tap cancels.
-    /// Touch: single tap places; two-finger tap cancels; pinch handled by the camera.
-    /// UI buttons should call <see cref="ActivateForIndex"/> directly.
+    /// Wall placement and removal.
+    ///
+    /// Placement: B toggles build mode, 1/2 pick structure, R rotates, Esc cancels.
+    ///   Mouse: left-click places; ghost follows cursor with green (valid) / red (invalid) tint.
+    ///   Touch: single tap places; two-finger tap cancels build mode.
+    ///
+    /// Removal: right-click (mouse) or long-press (touch, future) on any placed building.
+    ///   Works regardless of build mode.
+    ///
+    /// UI buttons call <see cref="ActivateForIndex"/> directly.
     /// </summary>
     public class BuildingPlacer : MonoBehaviour
     {
         [SerializeField] List<GameObject> buildables = new();
         [SerializeField] LayerMask groundMask = ~0;
+        [SerializeField] LayerMask buildingMask;
         [SerializeField] Material ghostMaterial;
-        [SerializeField] Color validTint = new Color(0.4f, 0.9f, 1f, 0.5f);
-        [SerializeField] Color invalidTint = new Color(1f, 0.3f, 0.3f, 0.5f);
+        [SerializeField] Color validTint   = new Color(0.2f, 0.9f, 0.2f, 0.5f);
+        [SerializeField] Color invalidTint = new Color(1f,   0.3f, 0.3f, 0.5f);
 
         public bool IsActive { get; private set; }
 
@@ -29,13 +36,15 @@ namespace Nightwall
 
         // Touch tracking: ignore taps that were part of a pan drag.
         Vector2 _touchDownPos;
-        const float TapMoveTolerance = 20f; // pixels
+        const float TapMoveTolerance = 20f;
 
         void Awake() => _cam = Camera.main;
 
         void Update()
         {
             if (_cam == null) _cam = Camera.main;
+
+            HandleRemoveInput();
 
             Keyboard kb = Keyboard.current;
             if (kb != null && kb.bKey.wasPressedThisFrame) Toggle();
@@ -49,7 +58,6 @@ namespace Nightwall
                 if (kb.escapeKey.wasPressedThisFrame) { Toggle(); return; }
             }
 
-            // Touch input
             if (Touchscreen.current != null && Touchscreen.current.touches.Count > 0)
             {
                 HandleTouch();
@@ -65,6 +73,14 @@ namespace Nightwall
             }
         }
 
+        // ── Input handlers ────────────────────────────────────────────────────
+
+        void HandleRemoveInput()
+        {
+            if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
+                TryRemove(Mouse.current.position.ReadValue());
+        }
+
         void HandleTouch()
         {
             var touches = Touchscreen.current.touches;
@@ -72,7 +88,6 @@ namespace Nightwall
             for (int i = 0; i < touches.Count; i++)
                 if (touches[i].isInProgress) activeCount++;
 
-            // Two-finger tap → cancel build mode.
             if (activeCount >= 2) { Toggle(); return; }
 
             var t0 = touches[0];
@@ -86,6 +101,8 @@ namespace Nightwall
                     Place();
             }
         }
+
+        // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>Enters build mode for the given buildable index. Called by UI buttons.</summary>
         public void ActivateForIndex(int index)
@@ -101,6 +118,8 @@ namespace Nightwall
             if (IsActive) BuildGhost();
             else ClearGhost();
         }
+
+        // ── Placement ─────────────────────────────────────────────────────────
 
         void SelectIndex(int i)
         {
@@ -161,17 +180,36 @@ namespace Nightwall
             Tint(_validPlacement ? validTint : invalidTint);
         }
 
+        void Place()
+        {
+            if (buildables.Count == 0 || buildables[_index] == null) return;
+            Instantiate(buildables[_index], _ghost.transform.position, _ghost.transform.rotation)
+                .name = buildables[_index].name;
+        }
+
+        // ── Removal ───────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Destroys a placed building under <paramref name="screenPos"/>.
+        /// Decoupled from build mode so touch can call it the same way.
+        /// </summary>
+        public void TryRemove(Vector2 screenPos)
+        {
+            if (_cam == null) return;
+            Ray ray = _cam.ScreenPointToRay(screenPos);
+            if (Physics.Raycast(ray, out RaycastHit hit, 500f, buildingMask))
+            {
+                var buildable = hit.collider.GetComponentInParent<Buildable>();
+                if (buildable != null) Destroy(buildable.gameObject);
+            }
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+
         Vector3? ScreenToGroundPoint(Vector2 screenPos)
         {
             Ray ray = _cam.ScreenPointToRay(screenPos);
             return Physics.Raycast(ray, out RaycastHit hit, 500f, groundMask) ? hit.point : (Vector3?)null;
-        }
-
-        void Place()
-        {
-            if (buildables.Count == 0 || buildables[_index] == null) return;
-            var go = Instantiate(buildables[_index], _ghost.transform.position, _ghost.transform.rotation);
-            go.name = buildables[_index].name;
         }
 
         Vector2Int CurrentFootprint()
