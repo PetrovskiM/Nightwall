@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.InputSystem;
 
 namespace Nightwall
@@ -136,6 +137,9 @@ namespace Nightwall
             _ghost.name = "BuildGhost";
             foreach (var mb in _ghost.GetComponentsInChildren<MonoBehaviour>()) mb.enabled = false;
             foreach (var col in _ghost.GetComponentsInChildren<Collider>()) col.enabled = false;
+            // The obstacle isn't a MonoBehaviour/Collider; leaving it on would carve the NavMesh
+            // and shove the horde around as the ghost tracks the cursor.
+            foreach (var ob in _ghost.GetComponentsInChildren<NavMeshObstacle>()) ob.enabled = false;
 
             if (ghostMaterial != null)
             {
@@ -183,6 +187,16 @@ namespace Nightwall
         void Place()
         {
             if (buildables.Count == 0 || buildables[_index] == null) return;
+
+            GridSystem grid = GridSystem.Instance;
+            Vector2Int footprint = CurrentFootprint();
+            if (grid != null)
+            {
+                Vector2Int cell = grid.WorldToCell(_ghost.transform.position);
+                if (!grid.CanPlace(cell, footprint)) return;   // guard against a stale valid flag
+                grid.Occupy(cell, footprint);                  // claim the cell now, no 1-frame gap
+            }
+
             Instantiate(buildables[_index], _ghost.transform.position, _ghost.transform.rotation)
                 .name = buildables[_index].name;
         }
