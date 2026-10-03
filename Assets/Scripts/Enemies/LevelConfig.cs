@@ -15,6 +15,8 @@ namespace Nightwall
         [Min(0)] public int spawnPointIndex;
         [Tooltip("How many enemies this entrance contributes to the wave.")]
         [Min(0)] public int count;
+        [Tooltip("Which archetype this group fields. Leave empty to use the spawner's default.")]
+        public EnemyDefinition enemyDefinition;
     }
 
     /// <summary>One authored night: which entrances are active, how many enemies each, and the cadence.</summary>

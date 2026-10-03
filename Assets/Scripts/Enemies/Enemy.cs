@@ -27,9 +27,9 @@ namespace Nightwall
         [Header("Wall combat")]
         [Tooltip("Reach at which the enemy stops and strikes a blocking structure ahead of it.")]
         [SerializeField] float attackRange = 2.5f;
-        [Tooltip("Sustained damage dealt to a wall while attacking. Per-hit damage = this × cooldown.")]
+        [Tooltip("Fallback wall DPS when no EnemyDefinition is applied. Archetypes override this.")]
         [SerializeField] float wallDamagePerSecond = 15f;
-        [Tooltip("Seconds between strikes (attack cadence). DPS is preserved regardless of this.")]
+        [Tooltip("Fallback strike cadence when no EnemyDefinition is applied. DPS is preserved.")]
         [SerializeField] float attackCooldown = 1f;
         [Tooltip("Layers treated as breachable structures (walls/towers). Set to the Building layer.")]
         [SerializeField] LayerMask structureMask = ~0;
@@ -39,10 +39,19 @@ namespace Nightwall
 
         public event Action<Enemy> Died;
 
+        /// <summary>The archetype this enemy was spawned as, or null if it uses the prefab fallback.</summary>
+        public EnemyDefinition Definition => _definition;
+
         NavMeshAgent _agent;
         NavAgentMotor _motor;
         Health _health;
         AttackEffect _attackEffect;
+        // The archetype applied at spawn (null => the prefab's serialized fallback stats are used).
+        EnemyDefinition _definition;
+        // Base agent footprint captured in Awake, so an archetype's size can scale from the authored
+        // prefab values rather than compounding if ApplyDefinition is ever called more than once.
+        float _baseAgentRadius, _baseAgentHeight;
+        Vector3 _baseScale;
         Transform _hq;
         Health _hqHealth;
         float _repathTimer;
@@ -63,6 +72,10 @@ namespace Nightwall
             if (_motor == null) _motor = gameObject.AddComponent<NavAgentMotor>();
             _health = GetComponent<Health>();
             _attackEffect = GetComponent<AttackEffect>();
+
+            _baseAgentRadius = _agent.radius;
+            _baseAgentHeight = _agent.height;
+            _baseScale = transform.localScale;
 
             // Default the breach mask to the Building layer if it was left as "Everything",
             // so the enemy only ever chews on structures — never units or the ground.
@@ -85,6 +98,57 @@ namespace Nightwall
         {
             _hq = hq;
             _hqHealth = hq != null ? hq.GetComponent<Health>() : null;
+        }
+
+        /// <summary>
+        /// Configure this enemy as an archetype from an <see cref="EnemyDefinition"/>: hit points,
+        /// speed, wall damage, strike cadence, footprint and appearance. Behaviour is unchanged — the
+        /// definition only supplies stats. Call once at spawn, before <see cref="Start"/>; a null
+        /// definition leaves the prefab's serialized fallback stats in place.
+        /// </summary>
+        public void ApplyDefinition(EnemyDefinition definition)
+        {
+            if (definition == null) return;
+            _definition = definition;
+
+            _health.SetMax(definition.MaxHealth);
+            _motor.MoveSpeed = definition.MoveSpeed;
+            wallDamagePerSecond = definition.WallDamagePerSecond;
+            attackCooldown = definition.AttackCooldown;
+
+            float size = Mathf.Max(0.1f, definition.Size);
+            transform.localScale = _baseScale * size;
+            // Keep the NavMesh footprint in step with the body so a brute actually takes more room.
+            _agent.radius = _baseAgentRadius * size;
+            _agent.height = _baseAgentHeight * size;
+
+            ApplyAppearance(definition);
+        }
+
+        /// <summary>
+        /// Either swap in the archetype's visual prefab (as a child, replacing the placeholder body)
+        /// or — when none is authored — tint the base body via a MaterialPropertyBlock so the four
+        /// archetypes read apart at phone scale without instantiating per-enemy materials.
+        /// </summary>
+        void ApplyAppearance(EnemyDefinition definition)
+        {
+            var renderer = GetComponent<MeshRenderer>();
+
+            if (definition.VisualPrefab != null)
+            {
+                if (renderer != null) renderer.enabled = false; // hide the placeholder capsule body
+                var visual = Instantiate(definition.VisualPrefab, transform);
+                visual.transform.localPosition = Vector3.zero;
+                visual.transform.localRotation = Quaternion.identity;
+                return;
+            }
+
+            if (renderer == null) return;
+            var block = new MaterialPropertyBlock();
+            renderer.GetPropertyBlock(block);
+            block.SetColor("_BaseColor", definition.BodyColor); // URP Lit
+            block.SetColor("_Color", definition.BodyColor);     // Standard fallback
+            renderer.SetPropertyBlock(block);
         }
 
         void Start()

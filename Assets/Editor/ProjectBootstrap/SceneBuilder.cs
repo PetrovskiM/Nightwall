@@ -32,6 +32,7 @@ namespace ProjectBootstrap
         const string MapConfigPath = ConfigDir + "/MapConfig.asset";
 
         static int _ground, _building;
+        static EnemyDefinition _basicDef, _runnerDef, _bruteDef, _swarmDef;
 
         [MenuItem("Nightwall/Rebuild Prototype Scene")]
         public static void Build()
@@ -56,6 +57,10 @@ namespace ProjectBootstrap
             Material trapMat = MakeMat("Trap", new Color(0.85f, 0.7f, 0.2f));
             Material ghostMat = MakeTransparentMat("Ghost", new Color(0.2f, 0.9f, 0.2f, 0.5f));
             Material gridMat = MakeUnlitTransparentMat("GridLines", new Color(0.55f, 0.75f, 1f, 0.14f));
+
+            // Enemy archetypes (data assets; the one Enemy prefab reads these at spawn). Under
+            // Resources so WaveSpawner can recover the default even if the binary scene drops the ref.
+            MakeEnemyDefinitions();
 
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
             GameObject wallPrefab = BuildWallPrefab(wallMat);
@@ -340,6 +345,7 @@ namespace ProjectBootstrap
             SetObject(waveSpawner, "enemyPrefab", enemyPrefab);
             SetObject(waveSpawner, "hq", hq.transform);
             SetArray(waveSpawner, "spawnPoints", spawns);
+            SetObject(waveSpawner, "defaultDefinition", _basicDef);
             SetObject(waveSpawner, "levelConfig", MakeLevelConfig(spawns.Length));
 
             SetArray(placer, "buildables",
@@ -504,13 +510,18 @@ namespace ProjectBootstrap
                 AssetDatabase.CreateAsset(cfg, LevelConfigPath);
             }
 
-            // (interval, [(index,count), ...]) per authored night.
-            var waves = new (float interval, (int idx, int count)[] groups)[]
+            // (interval, [(index, count, archetype), ...]) per authored night. Archetypes are
+            // introduced one at a time so each night teaches a new threat.
+            var waves = new (float interval, (int idx, int count, EnemyDefinition def)[] groups)[]
             {
-                (0.60f, new[] { (0, 6) }),                              // night 1: one entrance
-                (0.55f, new[] { (0, 4), (4, 4) }),                     // night 2: N + S pincer
-                (0.50f, new[] { (0, 5), (2, 4), (6, 4) }),             // night 3: N + E + W
-                (0.45f, new[] { (0, 4), (2, 4), (4, 4), (6, 4) }),     // night 4: all four edges
+                // night 1: a single entrance of plain Basics.
+                (0.60f, new[] { (0, 6, _basicDef) }),
+                // night 2: N + S pincer; Runners rush one flank while Basics press the other.
+                (0.55f, new[] { (0, 5, _basicDef), (4, 6, _runnerDef) }),
+                // night 3: three edges — a Brute arrives to break walls, backed by Basics/Runners.
+                (0.50f, new[] { (0, 5, _basicDef), (2, 6, _runnerDef), (6, 2, _bruteDef) }),
+                // night 4: all four edges, every archetype, including a Swarm flood from the south.
+                (0.40f, new[] { (0, 5, _basicDef), (2, 8, _runnerDef), (4, 16, _swarmDef), (6, 3, _bruteDef) }),
             };
 
             var so = new SerializedObject(cfg);
@@ -528,6 +539,7 @@ namespace ProjectBootstrap
                     var ep = gp.GetArrayElementAtIndex(g);
                     ep.FindPropertyRelative("spawnPointIndex").intValue = Mathf.Clamp(groups[g].idx, 0, spawnCount - 1);
                     ep.FindPropertyRelative("count").intValue = groups[g].count;
+                    ep.FindPropertyRelative("enemyDefinition").objectReferenceValue = groups[g].def;
                 }
             }
             so.FindProperty("proceduralBaseCount").intValue = 8;
@@ -536,6 +548,49 @@ namespace ProjectBootstrap
             so.ApplyModifiedProperties();
             EditorUtility.SetDirty(cfg);
             return cfg;
+        }
+
+        /// <summary>
+        /// Author the four starting archetypes as data assets under Resources. Only stats differ;
+        /// behaviour is shared in the Enemy component. No special abilities yet. Each tints the base
+        /// capsule (no visual prefab) so the archetypes read apart at phone scale.
+        /// </summary>
+        static void MakeEnemyDefinitions()
+        {
+            // (file, name, hp, speed, wallDps, cooldown, size, color, cost)
+            _basicDef = MakeEnemyDefinition("Enemy_Basic", "Basic",
+                40f, 3.5f, 15f, 1.0f, 1.0f, new Color(0.90f, 0.25f, 0.25f), 1);
+            _runnerDef = MakeEnemyDefinition("Enemy_Runner", "Runner",
+                16f, 6.5f, 6f, 0.8f, 0.75f, new Color(0.95f, 0.85f, 0.25f), 1);
+            _bruteDef = MakeEnemyDefinition("Enemy_Brute", "Brute",
+                450f, 1.6f, 60f, 1.2f, 1.7f, new Color(0.45f, 0.25f, 0.55f), 5);
+            _swarmDef = MakeEnemyDefinition("Enemy_Swarm", "Swarm",
+                8f, 4.2f, 2f, 0.6f, 0.5f, new Color(0.80f, 0.80f, 0.85f), 1);
+        }
+
+        static EnemyDefinition MakeEnemyDefinition(string file, string displayName,
+            float hp, float speed, float wallDps, float cooldown, float size, Color color, int cost)
+        {
+            string path = $"{ConfigDir}/{file}.asset";
+            var def = AssetDatabase.LoadAssetAtPath<EnemyDefinition>(path);
+            if (def == null)
+            {
+                def = ScriptableObject.CreateInstance<EnemyDefinition>();
+                AssetDatabase.CreateAsset(def, path);
+            }
+            var so = new SerializedObject(def);
+            so.FindProperty("displayName").stringValue = displayName;
+            so.FindProperty("maxHealth").floatValue = hp;
+            so.FindProperty("moveSpeed").floatValue = speed;
+            so.FindProperty("wallDamagePerSecond").floatValue = wallDps;
+            so.FindProperty("attackCooldown").floatValue = cooldown;
+            so.FindProperty("size").floatValue = size;
+            so.FindProperty("bodyColor").colorValue = color;
+            so.FindProperty("spawnCost").intValue = cost;
+            so.FindProperty("visualPrefab").objectReferenceValue = null;
+            so.ApplyModifiedProperties();
+            EditorUtility.SetDirty(def);
+            return def;
         }
 
         static void SetColor(Object comp, string prop, Color value)

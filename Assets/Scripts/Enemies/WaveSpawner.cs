@@ -23,6 +23,8 @@ namespace Nightwall
         [SerializeField] Transform hq;
         [Tooltip("Per-level wave schedule (which entrances, how many each, cadence).")]
         [SerializeField] LevelConfig levelConfig;
+        [Tooltip("Archetype used for groups that name none, and for every procedural-fallback night.")]
+        [SerializeField] EnemyDefinition defaultDefinition;
 
         /// <summary>Enemies from the current wave still alive.</summary>
         public int AliveCount { get; private set; }
@@ -30,13 +32,16 @@ namespace Nightwall
         public bool SpawningComplete { get; private set; } = true;
 
         Coroutine _spawn;
-        // Reused across waves so round-robin interleaving allocates nothing per spawn.
+        // Reused across waves so round-robin interleaving allocates nothing per spawn. The two lists
+        // run in lockstep: _order[i] is the entrance, _archetypes[i] the definition to spawn there.
         readonly List<SpawnPoint> _order = new List<SpawnPoint>();
+        readonly List<EnemyDefinition> _archetypes = new List<EnemyDefinition>();
 
         void Awake()
         {
             // Recover the schedule from Resources if the (binary) scene dropped the reference.
             if (levelConfig == null) levelConfig = Resources.Load<LevelConfig>("LevelConfig");
+            if (defaultDefinition == null) defaultDefinition = Resources.Load<EnemyDefinition>("Enemy_Basic");
         }
 
         /// <summary>Spawn the wave for the given 1-based wave number.</summary>
@@ -69,6 +74,7 @@ namespace Nightwall
             if (_spawn != null) StopCoroutine(_spawn);
             _spawn = null;
             _order.Clear();
+            _archetypes.Clear();
             SpawningComplete = true;
         }
 
@@ -80,9 +86,13 @@ namespace Nightwall
         void BuildSpawnOrder(int waveNumber, out float interval)
         {
             _order.Clear();
+            _archetypes.Clear();
 
-            // Per-entrance remaining counts for this wave.
-            int[] remaining = new int[spawnPoints.Length];
+            // Each pending group is an (entrance, archetype, remaining) triple; round-robining across
+            // groups interleaves both directions AND archetypes so a wave arrives mixed, not sorted.
+            var points = new List<SpawnPoint>();
+            var defs = new List<EnemyDefinition>();
+            var remaining = new List<int>();
             interval = 0.6f;
 
             if (levelConfig != null && levelConfig.TryGetWave(waveNumber, out WaveDefinition wave))
@@ -93,14 +103,16 @@ namespace Nightwall
                     foreach (SpawnGroup g in wave.groups)
                     {
                         if (g.spawnPointIndex < 0 || g.spawnPointIndex >= spawnPoints.Length) continue;
-                        if (spawnPoints[g.spawnPointIndex] == null) continue;
-                        remaining[g.spawnPointIndex] += Mathf.Max(0, g.count);
+                        if (spawnPoints[g.spawnPointIndex] == null || g.count <= 0) continue;
+                        points.Add(spawnPoints[g.spawnPointIndex]);
+                        defs.Add(g.enemyDefinition != null ? g.enemyDefinition : defaultDefinition);
+                        remaining.Add(g.count);
                     }
                 }
             }
             else
             {
-                // Procedural fallback: spread the budget evenly across every valid entrance.
+                // Procedural fallback: spread the default archetype evenly across every entrance.
                 int valid = 0;
                 for (int i = 0; i < spawnPoints.Length; i++) if (spawnPoints[i] != null) valid++;
                 if (valid == 0) return;
@@ -115,19 +127,24 @@ namespace Nightwall
                 for (int i = 0; i < spawnPoints.Length; i++)
                 {
                     if (spawnPoints[i] == null) continue;
-                    remaining[i] = baseEach + (extra-- > 0 ? 1 : 0);
+                    int count = baseEach + (extra-- > 0 ? 1 : 0);
+                    if (count <= 0) continue;
+                    points.Add(spawnPoints[i]);
+                    defs.Add(defaultDefinition);
+                    remaining.Add(count);
                 }
             }
 
-            // Round-robin the remaining counts into a single interleaved order.
+            // Round-robin the pending groups into a single interleaved order.
             bool any = true;
             while (any)
             {
                 any = false;
-                for (int i = 0; i < spawnPoints.Length; i++)
+                for (int i = 0; i < points.Count; i++)
                 {
                     if (remaining[i] <= 0) continue;
-                    _order.Add(spawnPoints[i]);
+                    _order.Add(points[i]);
+                    _archetypes.Add(defs[i]);
                     remaining[i]--;
                     any = true;
                 }
@@ -140,7 +157,7 @@ namespace Nightwall
             for (int i = 0; i < _order.Count; i++)
             {
                 SpawnPoint sp = _order[i];
-                Enemy enemy = sp != null ? sp.Spawn(enemyPrefab, hq) : null;
+                Enemy enemy = sp != null ? sp.Spawn(enemyPrefab, hq, _archetypes[i]) : null;
                 if (enemy != null)
                 {
                     enemy.Died += _ => AliveCount--;

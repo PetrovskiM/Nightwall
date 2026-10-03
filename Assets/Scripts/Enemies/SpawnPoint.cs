@@ -21,7 +21,7 @@ namespace Nightwall
 
         /// <summary>Spawn one enemy at this point, snapped to the mesh, and aim it at the base.</summary>
         /// <returns>The spawned <see cref="Enemy"/>, or null if the prefab is missing or had no Enemy.</returns>
-        public Enemy Spawn(GameObject enemyPrefab, Transform hq)
+        public Enemy Spawn(GameObject enemyPrefab, Transform hq, EnemyDefinition definition)
         {
             if (enemyPrefab == null) return null;
 
@@ -31,7 +31,11 @@ namespace Nightwall
 
             var go = Instantiate(enemyPrefab, pos, Quaternion.identity);
             var enemy = go.GetComponent<Enemy>();
-            if (enemy != null) enemy.Init(hq);
+            if (enemy != null)
+            {
+                enemy.Init(hq);
+                enemy.ApplyDefinition(definition); // null => prefab's fallback stats
+            }
             return enemy;
         }
 
