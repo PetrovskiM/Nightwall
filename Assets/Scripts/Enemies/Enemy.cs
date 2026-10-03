@@ -123,9 +123,12 @@ namespace Nightwall
         }
 
         /// <summary>
-        /// Authoritative "is the base reachable?" test. Computes a fresh path to the nearest
-        /// navmesh point by the HQ — the agent's own <c>pathStatus</c> is stale for a frame or two
-        /// right after a wall carves, which made the enemy stop and breach instead of rerouting.
+        /// "Is the base unreachable?" — computed from a fresh path, since the agent's own
+        /// <c>pathStatus</c> is stale for a frame or two right after a wall carves. A partial path
+        /// is NOT treated as walled out on its own: the HQ centre sits inside a blocker (always
+        /// off-mesh, so paths to it are partial), and one route being blocked doesn't mean every
+        /// route is. The enemy is only walled out when the farthest point it can actually reach is
+        /// still well short of the HQ — otherwise it keeps routing toward whatever gap exists.
         /// </summary>
         bool ComputeWalledOut()
         {
@@ -137,7 +140,14 @@ namespace Nightwall
                 target = hit.position;
 
             _agent.CalculatePath(target, _path);
-            return _path.status != NavMeshPathStatus.PathComplete;
+            if (_path.status == NavMeshPathStatus.PathComplete) return false;
+            if (_path.corners.Length == 0) return true;
+
+            Vector3 end = _path.corners[_path.corners.Length - 1];
+            float margin = hqAttackRange + 2f;
+            var flatEnd = new Vector2(end.x, end.z);
+            var flatHq = new Vector2(_hq.position.x, _hq.position.z);
+            return (flatEnd - flatHq).sqrMagnitude > margin * margin;
         }
 
         /// <summary>Nearest live structure within breach range that lies ahead toward the HQ, or null.</summary>
