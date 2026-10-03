@@ -265,6 +265,7 @@ namespace ProjectBootstrap
             var gameManager = systems.AddComponent<GameManager>();
             var waveSpawner = systems.AddComponent<WaveSpawner>();
             var placer = systems.AddComponent<BuildingPlacer>();
+            systems.AddComponent<DevHud>();
 
             // ----- Wire references via SerializedObject (robust for private [SerializeField]) -----
             SetObject(gameManager, "hq", hqComp);

@@ -47,6 +47,14 @@ namespace Nightwall
         {
             if (_cam == null) _cam = Camera.main;
 
+            // Building is a daytime activity. When night falls (or the run ends) disable all
+            // placement/removal input and cancel any build mode left open from the day.
+            if (GameManager.Instance != null && !GameManager.Instance.CanBuild)
+            {
+                if (IsActive) { IsActive = false; ClearGhost(); }
+                return;
+            }
+
             HandleRemoveInput();
 
             Keyboard kb = Keyboard.current;

@@ -3,7 +3,11 @@ using UnityEngine;
 
 namespace Nightwall
 {
-    /// <summary>Spawns escalating waves of enemies from the spawn points toward the HQ.</summary>
+    /// <summary>
+    /// Spawns a single night's wave of enemies on demand. The <see cref="GameManager"/> owns the
+    /// day/night loop and calls <see cref="SpawnWave"/> at nightfall; this component only produces
+    /// the horde and tracks how many of it remain alive so the night can resolve.
+    /// </summary>
     public class WaveSpawner : MonoBehaviour
     {
         [SerializeField] GameObject enemyPrefab;
@@ -12,49 +16,41 @@ namespace Nightwall
         [SerializeField] int baseCount = 5;
         [SerializeField] int countPerWave = 3;
         [SerializeField] float spawnInterval = 0.6f;
-        [SerializeField] float timeBetweenWaves = 8f;
-        [SerializeField] float waveGraceTimeout = 60f;
-        [SerializeField] bool autoStart = true;
 
-        int _wave;
-        int _alive;
-        Coroutine _loop;
+        /// <summary>Enemies from the current wave still alive.</summary>
+        public int AliveCount { get; private set; }
+        /// <summary>True once every enemy in the current wave has been spawned.</summary>
+        public bool SpawningComplete { get; private set; } = true;
 
-        void Start()
+        Coroutine _spawn;
+
+        /// <summary>Spawn the wave for the given 1-based wave number (scales with the number).</summary>
+        public void SpawnWave(int waveNumber)
         {
-            if (autoStart) Begin();
+            StopAll();
+            int count = baseCount + countPerWave * Mathf.Max(0, waveNumber - 1);
+            SpawningComplete = false;
+            _spawn = StartCoroutine(SpawnRoutine(count));
         }
 
-        public void Begin()
-        {
-            if (_loop == null) _loop = StartCoroutine(RunWaves());
-        }
-
+        /// <summary>
+        /// Stop spawning the remainder of the current wave. Enemies already on the field live on;
+        /// the night normally ends only once they are all dead.
+        /// </summary>
         public void StopAll()
         {
-            if (_loop != null) StopCoroutine(_loop);
-            _loop = null;
+            if (_spawn != null) StopCoroutine(_spawn);
+            _spawn = null;
+            SpawningComplete = true;
         }
 
-        IEnumerator RunWaves()
+        IEnumerator SpawnRoutine(int count)
         {
-            while (true)
+            if (enemyPrefab == null || spawnPoints == null || spawnPoints.Length == 0)
             {
-                _wave++;
-                if (GameManager.Instance != null) GameManager.Instance.SetWaveNumber(_wave);
-
-                int count = baseCount + countPerWave * (_wave - 1);
-                yield return SpawnWave(count);
-
-                float t = 0f;
-                while (_alive > 0 && t < waveGraceTimeout) { t += Time.deltaTime; yield return null; }
-                yield return new WaitForSeconds(timeBetweenWaves);
+                SpawningComplete = true;
+                yield break;
             }
-        }
-
-        IEnumerator SpawnWave(int count)
-        {
-            if (enemyPrefab == null || spawnPoints == null || spawnPoints.Length == 0) yield break;
 
             for (int i = 0; i < count; i++)
             {
@@ -64,11 +60,12 @@ namespace Nightwall
                 if (enemy != null)
                 {
                     enemy.Init(hq);
-                    enemy.Died += _ => _alive--;
-                    _alive++;
+                    enemy.Died += _ => AliveCount--;
+                    AliveCount++;
                 }
                 yield return new WaitForSeconds(spawnInterval);
             }
+            SpawningComplete = true;
         }
     }
 }
