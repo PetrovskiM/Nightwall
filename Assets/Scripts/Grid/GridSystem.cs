@@ -42,8 +42,13 @@ namespace Nightwall
             if (Instance != null && Instance != this) { Destroy(this); return; }
             Instance = this;
 
+            // Fallback for when the serialized scene reference is lost (the prototype scene saves
+            // as binary, which can drop object references). The asset lives in a Resources folder.
             if (config == null)
-                Debug.LogError("[GridSystem] MapConfig is not assigned.", this);
+                config = Resources.Load<MapConfig>("MapConfig");
+
+            if (config == null)
+                Debug.LogError("[GridSystem] MapConfig is not assigned and none found in Resources.", this);
         }
 
         void OnDestroy()

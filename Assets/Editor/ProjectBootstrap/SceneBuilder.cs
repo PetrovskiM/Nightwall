@@ -25,7 +25,9 @@ namespace ProjectBootstrap
         const string MatDir = "Assets/Art/Materials";
         const string PrefabDir = "Assets/Prefabs";
         const string SceneDir = "Assets/Scenes";
-        const string ConfigDir = "Assets/ScriptableObjects";
+        // MapConfig lives under Resources so GridSystem can recover it at runtime even when the
+        // binary-saved scene drops the serialized reference.
+        const string ConfigDir = "Assets/Resources";
         const string ScenePath = SceneDir + "/Nightwall.unity";
         const string MapConfigPath = ConfigDir + "/MapConfig.asset";
 
