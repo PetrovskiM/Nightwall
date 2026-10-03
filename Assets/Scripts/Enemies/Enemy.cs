@@ -76,6 +76,8 @@ namespace Nightwall
         {
             _motor.WarpToNavMesh();
             if (_hq != null) _motor.SetDestination(_hq.position);
+            // Desync repaths so the whole horde doesn't recompute on the same frame.
+            _repathTimer = Random.Range(0f, repathInterval);
         }
 
         void Update()

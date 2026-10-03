@@ -100,11 +100,19 @@ namespace ProjectBootstrap
 
             var agent = root.AddComponent<NavMeshAgent>();
             agent.radius = 0.4f; agent.height = 1.8f; agent.speed = 3.5f; agent.angularSpeed = 720f; agent.acceleration = 20f;
+            // Smoother crowd motion: good-quality avoidance with a shorter prediction window
+            // oscillates less than the default, and a small stopping distance keeps agents from
+            // grinding into the exact same point.
+            agent.obstacleAvoidanceType = ObstacleAvoidanceType.GoodQualityObstacleAvoidance;
+            agent.avoidancePredictionTime = 1f;
+            agent.stoppingDistance = 0.3f;
 
             // Kinematic body so the NavMesh-driven agent still raises trigger events (traps).
+            // Interpolate so the rendered capsule doesn't snap between the agent's per-frame moves.
             var rb = root.AddComponent<Rigidbody>();
             rb.isKinematic = true;
             rb.useGravity = false;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
 
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 40f);
