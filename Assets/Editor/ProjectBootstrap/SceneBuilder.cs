@@ -115,6 +115,7 @@ namespace ProjectBootstrap
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 40f);
             root.AddComponent<NavAgentMotor>();
+            root.AddComponent<AttackEffect>();
             root.AddComponent<Enemy>();
 
             return SavePrefab(root, "Enemy");

@@ -5,12 +5,15 @@ using UnityEngine.AI;
 namespace Nightwall
 {
     /// <summary>
-    /// Objective-driven enemy: it always heads for the HQ. Player-built walls are NavMesh
-    /// obstacles (carving), so the agent reroutes around them automatically — the maze, and the
-    /// "longer path = more survival time" trade-off, emerge from pathfinding rather than scripted
-    /// lanes. The enemy attacks a structure ONLY when it is genuinely walled out: when no complete
-    /// path to the HQ exists it breaches the nearest blocker toward the base to reopen a route.
-    /// Locomotion is delegated to <see cref="NavAgentMotor"/>.
+    /// Objective-driven enemy: it always heads for the HQ. Player-built walls are NavMesh obstacles
+    /// (carving), so the agent reroutes around them automatically — the maze, and the "longer path =
+    /// more survival time" trade-off, emerge from pathfinding rather than scripted lanes.
+    ///
+    /// The go-around-vs-destroy decision is settled by the agent's own path: while a complete route
+    /// to the HQ exists the enemy simply follows it (it navigates around walls); only when it is
+    /// genuinely walled out — no complete path — does it stop at the nearest blocking structure ahead
+    /// and chew through it, reopening a route the instant the wall falls. This is the project's hard
+    /// rule: breach ONLY when no path exists. Locomotion is delegated to <see cref="NavAgentMotor"/>.
     /// </summary>
     [RequireComponent(typeof(NavMeshAgent))]
     [RequireComponent(typeof(NavAgentMotor))]
@@ -19,16 +22,19 @@ namespace Nightwall
     {
         [Header("Objective (the base)")]
         [SerializeField] float hqAttackRange = 3f;
-        [SerializeField] float hqDamage = 10f;
+        [SerializeField] float hqDamagePerSecond = 10f;
 
-        [Header("Breaching (only when no path exists)")]
-        [Tooltip("When fully walled out, the nearest blocking structure toward the HQ within this radius is attacked.")]
-        [SerializeField] float breachRange = 2.5f;
-        [SerializeField] float breachDamage = 15f;
-        [SerializeField] float attackInterval = 1f;
-        [Tooltip("Layers treated as breachable structures (walls/towers/HQ). Set to the Building layer.")]
+        [Header("Wall combat")]
+        [Tooltip("Reach at which the enemy stops and strikes a blocking structure ahead of it.")]
+        [SerializeField] float attackRange = 2.5f;
+        [Tooltip("Sustained damage dealt to a wall while attacking. Per-hit damage = this × cooldown.")]
+        [SerializeField] float wallDamagePerSecond = 15f;
+        [Tooltip("Seconds between strikes (attack cadence). DPS is preserved regardless of this.")]
+        [SerializeField] float attackCooldown = 1f;
+        [Tooltip("Layers treated as breachable structures (walls/towers). Set to the Building layer.")]
         [SerializeField] LayerMask structureMask = ~0;
 
+        [Tooltip("How often the enemy re-evaluates its route to the base.")]
         [SerializeField] float repathInterval = 0.5f;
 
         public event Action<Enemy> Died;
@@ -36,6 +42,7 @@ namespace Nightwall
         NavMeshAgent _agent;
         NavAgentMotor _motor;
         Health _health;
+        AttackEffect _attackEffect;
         Transform _hq;
         Health _hqHealth;
         float _repathTimer;
@@ -44,12 +51,18 @@ namespace Nightwall
         Vector3 _hqNavPoint;
         readonly Collider[] _hits = new Collider[8];
 
+        // The wall currently being chewed. Tracked so we can repath the instant it dies instead of
+        // waiting out the repath interval, and so the subscription is cleaned up symmetrically.
+        Health _targetWall;
+        Action<Health> _onTargetWallDied;
+
         void Awake()
         {
             _agent = GetComponent<NavMeshAgent>();
             _motor = GetComponent<NavAgentMotor>();
             if (_motor == null) _motor = gameObject.AddComponent<NavAgentMotor>();
             _health = GetComponent<Health>();
+            _attackEffect = GetComponent<AttackEffect>();
 
             // Default the breach mask to the Building layer if it was left as "Everything",
             // so the enemy only ever chews on structures — never units or the ground.
@@ -58,6 +71,8 @@ namespace Nightwall
                 int building = LayerMask.NameToLayer("Building");
                 if (building >= 0) structureMask = 1 << building;
             }
+
+            _onTargetWallDied = _ => _repathTimer = 0f; // wall fell: recompute the route immediately
 
             _health.Died += _ =>
             {
@@ -87,6 +102,8 @@ namespace Nightwall
             _repathTimer = UnityEngine.Random.Range(0f, repathInterval);
         }
 
+        void OnDestroy() => ClearTargetWall();
+
         void Update()
         {
             if (_hq == null) return;
@@ -102,8 +119,9 @@ namespace Nightwall
             // At the base? Attack it.
             if ((_hq.position - transform.position).sqrMagnitude <= hqAttackRange * hqAttackRange)
             {
+                ClearTargetWall();
                 _motor.Stop();
-                TryAttack(_hqHealth, hqDamage);
+                TryAttack(_hqHealth, hqDamagePerSecond);
                 return;
             }
 
@@ -122,12 +140,14 @@ namespace Nightwall
                 Health blocker = FindBlockerTowardHq();
                 if (blocker != null)
                 {
-                    _motor.Stop();
-                    TryAttack(blocker, breachDamage);
+                    TrackTargetWall(blocker);
+                    _motor.Stop();                      // stop at attack range, don't shove the wall
+                    TryAttack(blocker, wallDamagePerSecond);
                     return;
                 }
             }
 
+            ClearTargetWall();
             _motor.Resume();
         }
 
@@ -153,7 +173,7 @@ namespace Nightwall
             return (flatEnd - flatHq).sqrMagnitude > margin * margin;
         }
 
-        /// <summary>Nearest live structure within breach range that lies ahead toward the HQ, or null.</summary>
+        /// <summary>Nearest live structure within attack range that lies ahead toward the HQ, or null.</summary>
         Health FindBlockerTowardHq()
         {
             Vector3 pos = transform.position;
@@ -161,7 +181,7 @@ namespace Nightwall
             bool haveDir = toHq.sqrMagnitude > 0.0001f;
             if (haveDir) toHq.Normalize();
 
-            int n = Physics.OverlapSphereNonAlloc(pos, breachRange, _hits, structureMask, QueryTriggerInteraction.Ignore);
+            int n = Physics.OverlapSphereNonAlloc(pos, attackRange, _hits, structureMask, QueryTriggerInteraction.Ignore);
             Health best = null;
             float bestSqr = float.MaxValue;
             for (int i = 0; i < n; i++)
@@ -181,15 +201,36 @@ namespace Nightwall
             return best;
         }
 
-        void TryAttack(Health target, float damage)
+        /// <summary>
+        /// Apply damage on the attack cadence. Per strike we deal <paramref name="damagePerSecond"/>
+        /// × <see cref="attackCooldown"/>, so the authored DPS holds regardless of the cadence, and
+        /// a wall takes a predictable time to fall however often the strike "animation" plays.
+        /// </summary>
+        void TryAttack(Health target, float damagePerSecond)
         {
             if (target == null || target.IsDead) return;
             _attackTimer -= Time.deltaTime;
             if (_attackTimer <= 0f)
             {
-                _attackTimer = attackInterval;
-                target.TakeDamage(damage);
+                _attackTimer = attackCooldown;
+                target.TakeDamage(damagePerSecond * attackCooldown);
+                _attackEffect?.Play();
             }
+        }
+
+        /// <summary>Subscribe to the wall we're attacking so its death triggers an immediate repath.</summary>
+        void TrackTargetWall(Health wall)
+        {
+            if (_targetWall == wall) return;
+            ClearTargetWall();
+            _targetWall = wall;
+            if (_targetWall != null) _targetWall.Died += _onTargetWallDied;
+        }
+
+        void ClearTargetWall()
+        {
+            if (_targetWall != null) _targetWall.Died -= _onTargetWallDied;
+            _targetWall = null;
         }
     }
 }
