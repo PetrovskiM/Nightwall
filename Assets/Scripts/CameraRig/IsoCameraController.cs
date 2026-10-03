@@ -55,9 +55,77 @@ namespace Nightwall
             }
         }
 
+        // Touch state for pan and pinch.
+        Vector2 _prevSingleTouch;
+        float _prevPinchDist;
+        bool _isPinching;
+
         void Update()
         {
-            Vector2 move = ReadMove();
+            if (Touchscreen.current != null && Touchscreen.current.touches.Count > 0)
+            {
+                HandleTouch();
+            }
+            else
+            {
+                HandleKeyboardMouse();
+            }
+        }
+
+        void HandleTouch()
+        {
+            var touches = Touchscreen.current.touches;
+            int activeCount = 0;
+            for (int i = 0; i < touches.Count; i++)
+                if (touches[i].isInProgress) activeCount++;
+
+            if (activeCount == 1)
+            {
+                _isPinching = false;
+                var t0 = touches[0];
+                Vector2 pos = t0.position.ReadValue();
+                if (t0.phase.ReadValue() == UnityEngine.InputSystem.TouchPhase.Began)
+                {
+                    _prevSingleTouch = pos;
+                }
+                else if (t0.phase.ReadValue() == UnityEngine.InputSystem.TouchPhase.Moved)
+                {
+                    Vector2 delta = pos - _prevSingleTouch;
+                    // Invert: drag finger right moves camera right (world moves left under finger).
+                    PanByScreenDelta(-delta);
+                    _prevSingleTouch = pos;
+                }
+            }
+            else if (activeCount >= 2)
+            {
+                Vector2 p0 = Vector2.zero, p1 = Vector2.zero;
+                int found = 0;
+                for (int i = 0; i < touches.Count && found < 2; i++)
+                {
+                    if (touches[i].isInProgress) { if (found == 0) p0 = touches[i].position.ReadValue(); else p1 = touches[i].position.ReadValue(); found++; }
+                }
+                float dist = Vector2.Distance(p0, p1);
+                if (!_isPinching) { _prevPinchDist = dist; _isPinching = true; }
+                float pinchDelta = _prevPinchDist - dist;
+                if (Mathf.Abs(pinchDelta) > 0.5f)
+                {
+                    LensSettings lens = _vcam.Lens;
+                    lens.OrthographicSize = Mathf.Clamp(
+                        lens.OrthographicSize + pinchDelta * zoomSpeed * 0.02f, minZoom, maxZoom);
+                    _vcam.Lens = lens;
+                }
+                _prevPinchDist = dist;
+            }
+            else
+            {
+                _isPinching = false;
+            }
+        }
+
+        void HandleKeyboardMouse()
+        {
+            _isPinching = false;
+            Vector2 move = ReadKeyboardEdge();
             if (move.sqrMagnitude > 0.0001f)
             {
                 Vector3 delta = (_right * move.x + _forward * move.y).normalized * panSpeed * Time.deltaTime;
@@ -74,7 +142,16 @@ namespace Nightwall
             }
         }
 
-        Vector2 ReadMove()
+        /// <summary>Converts a screen-space pixel delta into a world-space camera pan.</summary>
+        void PanByScreenDelta(Vector2 screenDelta)
+        {
+            // Scale delta so one pixel matches one pixel of world movement at current zoom.
+            float unitsPerPixel = (_vcam.Lens.OrthographicSize * 2f) / Screen.height;
+            Vector3 worldDelta = (_right * screenDelta.x + _forward * screenDelta.y) * unitsPerPixel;
+            transform.position = Clamp(transform.position + worldDelta);
+        }
+
+        Vector2 ReadKeyboardEdge()
         {
             Vector2 v = Vector2.zero;
             Keyboard kb = Keyboard.current;

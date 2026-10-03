@@ -5,10 +5,10 @@ using UnityEngine.InputSystem;
 namespace Nightwall
 {
     /// <summary>
-    /// Build mode: B toggles it, 1/2 pick a structure, R rotates, left-click places on the
-    /// grid-snapped ground point, Esc cancels. The ghost preview snaps to cell centres via the
-    /// <see cref="GridSystem"/> and turns red when the target cells are out of bounds or already
-    /// occupied; placement is refused there.
+    /// Build mode: B toggles it, 1/2 pick a structure, R rotates, left-click/tap places on the
+    /// grid-snapped ground point, Esc/two-finger-tap cancels.
+    /// Touch: single tap places; two-finger tap cancels; pinch handled by the camera.
+    /// UI buttons should call <see cref="ActivateForIndex"/> directly.
     /// </summary>
     public class BuildingPlacer : MonoBehaviour
     {
@@ -26,6 +26,10 @@ namespace Nightwall
         Material _ghostInstance;
         Camera _cam;
         bool _validPlacement;
+
+        // Touch tracking: ignore taps that were part of a pan drag.
+        Vector2 _touchDownPos;
+        const float TapMoveTolerance = 20f; // pixels
 
         void Awake() => _cam = Camera.main;
 
@@ -45,11 +49,50 @@ namespace Nightwall
                 if (kb.escapeKey.wasPressedThisFrame) { Toggle(); return; }
             }
 
-            UpdateGhost();
+            // Touch input
+            if (Touchscreen.current != null && Touchscreen.current.touches.Count > 0)
+            {
+                HandleTouch();
+                if (_ghost != null) UpdateGhostAtPosition(ScreenToGroundPoint(
+                    Touchscreen.current.touches[0].position.ReadValue()));
+            }
+            else
+            {
+                UpdateGhost();
+                if (_ghost != null && _validPlacement &&
+                    Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+                    Place();
+            }
+        }
 
-            if (_ghost != null && _validPlacement &&
-                Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
-                Place();
+        void HandleTouch()
+        {
+            var touches = Touchscreen.current.touches;
+            int activeCount = 0;
+            for (int i = 0; i < touches.Count; i++)
+                if (touches[i].isInProgress) activeCount++;
+
+            // Two-finger tap → cancel build mode.
+            if (activeCount >= 2) { Toggle(); return; }
+
+            var t0 = touches[0];
+            var phase = t0.phase.ReadValue();
+            if (phase == UnityEngine.InputSystem.TouchPhase.Began)
+                _touchDownPos = t0.position.ReadValue();
+            else if (phase == UnityEngine.InputSystem.TouchPhase.Ended)
+            {
+                Vector2 up = t0.position.ReadValue();
+                if (Vector2.Distance(up, _touchDownPos) < TapMoveTolerance && _ghost != null && _validPlacement)
+                    Place();
+            }
+        }
+
+        /// <summary>Enters build mode for the given buildable index. Called by UI buttons.</summary>
+        public void ActivateForIndex(int index)
+        {
+            _index = Mathf.Clamp(index, 0, buildables.Count - 1);
+            if (!IsActive) Toggle();
+            else BuildGhost();
         }
 
         public void Toggle()
@@ -93,26 +136,35 @@ namespace Nightwall
         void UpdateGhost()
         {
             if (_ghost == null || Mouse.current == null) return;
+            Vector3? worldPos = ScreenToGroundPoint(Mouse.current.position.ReadValue());
+            if (worldPos.HasValue) UpdateGhostAtPosition(worldPos);
+        }
 
-            Ray ray = _cam.ScreenPointToRay(Mouse.current.position.ReadValue());
-            if (!Physics.Raycast(ray, out RaycastHit hit, 500f, groundMask)) return;
+        void UpdateGhostAtPosition(Vector3? worldPos)
+        {
+            if (_ghost == null || !worldPos.HasValue) return;
 
             GridSystem grid = GridSystem.Instance;
             Vector2Int footprint = CurrentFootprint();
             if (grid != null)
             {
-                Vector2Int cell = grid.WorldToCell(hit.point);
+                Vector2Int cell = grid.WorldToCell(worldPos.Value);
                 _ghost.transform.position = grid.CellToWorld(cell);
                 _validPlacement = grid.CanPlace(cell, footprint);
             }
             else
             {
-                _ghost.transform.position = hit.point;
+                _ghost.transform.position = worldPos.Value;
                 _validPlacement = true;
             }
             _ghost.transform.rotation = Quaternion.Euler(0f, _yaw, 0f);
-
             Tint(_validPlacement ? validTint : invalidTint);
+        }
+
+        Vector3? ScreenToGroundPoint(Vector2 screenPos)
+        {
+            Ray ray = _cam.ScreenPointToRay(screenPos);
+            return Physics.Raycast(ray, out RaycastHit hit, 500f, groundMask) ? hit.point : (Vector3?)null;
         }
 
         void Place()
