@@ -199,6 +199,9 @@ namespace ProjectBootstrap
             var hqHealth = hq.AddComponent<Health>();
             SetFloat(hqHealth, "maxHealth", 1000f);
             var hqComp = hq.AddComponent<Hq>();
+            // Placeholder base health bar: reads the HQ's Health only, floats above the core.
+            var hqBar = hq.AddComponent<HqHealthBar>();
+            SetFloat(hqBar, "heightOffset", 3.5f);
 
             // Bake now that the static blockers (ground + HQ) exist.
             surface.BuildNavMesh();
