@@ -105,6 +105,23 @@ namespace Nightwall
         }
 
         /// <summary>
+        /// Scale this enemy's already-applied stats by a <see cref="DifficultyModifier"/>. Call
+        /// after <see cref="ApplyDefinition"/> so the modifier stacks on top of the archetype base.
+        /// Identity multipliers (0 or 1) are no-ops.
+        /// </summary>
+        public void ApplyDifficultyModifier(DifficultyModifier mod)
+        {
+            if (mod.IsIdentity) return;
+            float hm = DifficultyModifier.Effective(mod.healthMultiplier);
+            float sm = DifficultyModifier.Effective(mod.speedMultiplier);
+            float dm = DifficultyModifier.Effective(mod.damageMultiplier);
+
+            _health.SetMax(_health.Max * hm);
+            _motor.MoveSpeed *= sm;
+            wallDamagePerSecond *= dm;
+        }
+
+        /// <summary>
         /// Configure this enemy as an archetype from an <see cref="EnemyDefinition"/>: hit points,
         /// speed, wall damage, strike cadence, footprint and appearance. Behaviour is unchanged — the
         /// definition only supplies stats. Call once at spawn, before <see cref="Start"/>; a null

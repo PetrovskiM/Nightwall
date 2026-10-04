@@ -353,6 +353,7 @@ namespace ProjectBootstrap
             var placer       = systems.AddComponent<BuildingPlacer>();
             var buildBar     = systems.AddComponent<BuildBar>();
             systems.AddComponent<DevHud>();
+            systems.AddComponent<WavePreviewHud>();
 
             // Configure AttackDirectionSelector difficulty curves.
             // Min active sides: 1 all the way through (even late waves can be 1-side).
