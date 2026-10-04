@@ -260,7 +260,13 @@ namespace ProjectBootstrap
             var hqBar = hq.AddComponent<HqHealthBar>();
             SetFloat(hqBar, "heightOffset", 3.5f);
 
-            // Bake now that the static blockers (ground + HQ) exist.
+            // Mark the outer perimeter band as "NearWall" (NavMesh area 3) so archetypes that have
+            // a high cost for that area (e.g. Brutes) prefer interior routes instead of hugging
+            // the walls the player builds near the map edge. The volumes are baked into the NavMesh;
+            // they do not affect physics or visibility. Width = 12 units covers the typical build zone.
+            AddNavPerimeterZone(map, worldMin, worldMax, perimeterWidth: 12f);
+
+            // Bake now that the static blockers (ground + HQ) and area modifiers exist.
             surface.BuildNavMesh();
 
             // Grid system (spatial source of truth) referencing the MapConfig.
@@ -568,19 +574,24 @@ namespace ProjectBootstrap
         /// </summary>
         static void MakeEnemyDefinitions()
         {
-            // (file, name, hp, speed, wallDps, cooldown, size, color, cost)
+            // (file, name, hp, speed, wallDps, cooldown, size, color, spawnCost, navOverrides)
+            // navOverrides: null = no per-area cost preference (uses Unity defaults).
+            // Brutes get a high cost for area 3 "NearWall" — they'll path through the open interior
+            // rather than hugging the map edge where walls are typically placed.
             _basicDef = MakeEnemyDefinition("Enemy_Basic", "Basic",
-                40f, 3.5f, 15f, 1.0f, 1.0f, new Color(0.90f, 0.25f, 0.25f), 1);
+                40f, 3.5f, 15f, 1.0f, 1.0f, new Color(0.90f, 0.25f, 0.25f), 1, null);
             _runnerDef = MakeEnemyDefinition("Enemy_Runner", "Runner",
-                16f, 6.5f, 6f, 0.8f, 0.75f, new Color(0.95f, 0.85f, 0.25f), 1);
+                16f, 6.5f, 6f, 0.8f, 0.75f, new Color(0.95f, 0.85f, 0.25f), 1, null);
             _bruteDef = MakeEnemyDefinition("Enemy_Brute", "Brute",
-                450f, 1.6f, 60f, 1.2f, 1.7f, new Color(0.45f, 0.25f, 0.55f), 5);
+                450f, 1.6f, 60f, 1.2f, 1.7f, new Color(0.45f, 0.25f, 0.55f), 5,
+                new[] { new NavAreaCostOverride { areaIndex = 3, costMultiplier = 5f } });
             _swarmDef = MakeEnemyDefinition("Enemy_Swarm", "Swarm",
-                8f, 4.2f, 2f, 0.6f, 0.5f, new Color(0.80f, 0.80f, 0.85f), 1);
+                8f, 4.2f, 2f, 0.6f, 0.5f, new Color(0.80f, 0.80f, 0.85f), 1, null);
         }
 
         static EnemyDefinition MakeEnemyDefinition(string file, string displayName,
-            float hp, float speed, float wallDps, float cooldown, float size, Color color, int cost)
+            float hp, float speed, float wallDps, float cooldown, float size, Color color, int cost,
+            NavAreaCostOverride[] navCostOverrides)
         {
             string path = $"{ConfigDir}/{file}.asset";
             var def = AssetDatabase.LoadAssetAtPath<EnemyDefinition>(path);
@@ -599,9 +610,63 @@ namespace ProjectBootstrap
             so.FindProperty("bodyColor").colorValue = color;
             so.FindProperty("spawnCost").intValue = cost;
             so.FindProperty("visualPrefab").objectReferenceValue = null;
+
+            // Write nav cost overrides (may be null/empty for archetypes with default nav behaviour).
+            var overridesProp = so.FindProperty("navCostOverrides");
+            int overrideCount = navCostOverrides?.Length ?? 0;
+            overridesProp.arraySize = overrideCount;
+            for (int i = 0; i < overrideCount; i++)
+            {
+                var ep = overridesProp.GetArrayElementAtIndex(i);
+                ep.FindPropertyRelative("areaIndex").intValue = navCostOverrides[i].areaIndex;
+                ep.FindPropertyRelative("costMultiplier").floatValue = navCostOverrides[i].costMultiplier;
+            }
+
             so.ApplyModifiedProperties();
             EditorUtility.SetDirty(def);
             return def;
+        }
+
+        /// <summary>
+        /// Adds four <see cref="NavMeshModifierVolume"/> strips around the map perimeter so the outer
+        /// band is marked as the "NearWall" NavMesh area (index 3) when the mesh is baked. Archetypes
+        /// with a high cost for that area (e.g. Brutes) will path through the open interior instead.
+        /// Volumes are thin (y=2) so they only tag the walkable ground, not the full map height.
+        /// </summary>
+        static void AddNavPerimeterZone(MapConfig map, Vector2 worldMin, Vector2 worldMax, float perimeterWidth)
+        {
+            const int NearWallArea = 3; // must match the "NearWall" entry in NavMeshAreas.asset
+            float mapW  = worldMax.x - worldMin.x;
+            float mapH  = worldMax.y - worldMin.y;
+            float cx    = map.Origin.x;
+            float cz    = map.Origin.z;
+            const float volHeight = 2f;
+            const float volY      = 0f;
+
+            // (centre-x, centre-z, size-x, size-z)
+            (float bx, float bz, float bw, float bd)[] strips =
+            {
+                // North strip
+                (cx, worldMax.y - perimeterWidth * 0.5f, mapW, perimeterWidth),
+                // South strip
+                (cx, worldMin.y + perimeterWidth * 0.5f, mapW, perimeterWidth),
+                // East strip (interior only, corners already covered by N/S)
+                (worldMax.x - perimeterWidth * 0.5f, cz, perimeterWidth, mapH - perimeterWidth * 2),
+                // West strip
+                (worldMin.x + perimeterWidth * 0.5f, cz, perimeterWidth, mapH - perimeterWidth * 2),
+            };
+
+            var parent = new GameObject("NavPerimeterZones");
+            foreach (var (bx, bz, bw, bd) in strips)
+            {
+                var go = new GameObject("NearWall_Zone");
+                go.transform.SetParent(parent.transform, false);
+                go.transform.position = new Vector3(bx, volY, bz);
+                var mod = go.AddComponent<NavMeshModifierVolume>();
+                mod.area  = NearWallArea;
+                mod.size  = new Vector3(bw, volHeight, bd);
+                mod.center = Vector3.zero;
+            }
         }
 
         static void SetColor(Object comp, string prop, Color value)
