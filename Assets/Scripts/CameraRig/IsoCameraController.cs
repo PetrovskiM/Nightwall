@@ -5,10 +5,16 @@ using UnityEngine.InputSystem;
 namespace Nightwall
 {
     /// <summary>
-    /// Pans an orthographic isometric Cinemachine camera across the ground plane
-    /// (WASD / arrows / screen-edge) and zooms by changing the orthographic size. Pan limits are
-    /// taken from the <see cref="MapConfig"/> (plus a margin) so the view always matches the map
-    /// without hand-tuned bounds. Attach to the CinemachineCamera object.
+    /// Pans an orthographic isometric Cinemachine camera across the ground plane and zooms by
+    /// changing the orthographic size. All gestures come from <see cref="InputService"/>: two-finger
+    /// drag pans, pinch (or scroll wheel) zooms, and an optional two-finger twist can rotate the rig.
+    /// Keyboard (WASD / arrows) and screen-edge panning stay available for Editor development. Pan
+    /// limits are taken from the <see cref="MapConfig"/> (plus a margin) so the view always matches
+    /// the map without hand-tuned bounds. Attach to the CinemachineCamera object.
+    ///
+    /// Input feeds a <i>target</i> position and orthographic size; the rig eases toward them with
+    /// <see cref="Mathf.SmoothDamp"/> each frame. Smoothing times are kept short so the camera stays
+    /// responsive for spotting breaches and incoming hordes rather than feeling cinematic.
     /// </summary>
     [RequireComponent(typeof(CinemachineCamera))]
     public class IsoCameraController : MonoBehaviour
@@ -25,14 +31,34 @@ namespace Nightwall
 
         [Header("Zoom")]
         [SerializeField] float zoomSpeed = 5f;
+        [Tooltip("Closest view — tight enough to read a single gate/trap and nearby wall joints.")]
         [SerializeField] float minZoom = 6f;
+        [Tooltip("Widest view — far enough to see the whole maze and approaching hordes at once.")]
         [SerializeField] float maxZoom = 40f;
+
+        [Header("Smoothing (responsive, not cinematic)")]
+        [Tooltip("Seconds for pan to settle. Small = snappy. Zero disables pan smoothing.")]
+        [SerializeField] float panSmoothTime = 0.08f;
+        [Tooltip("Seconds for zoom to settle. Small = snappy. Zero disables zoom smoothing.")]
+        [SerializeField] float zoomSmoothTime = 0.12f;
+
+        [Header("Rotation (optional)")]
+        [Tooltip("Allow two-finger twist to rotate the iso rig. Off by default: a fixed angle keeps " +
+                 "the isometric view readable and the pan/edge controls predictable.")]
+        [SerializeField] bool enableTwistRotation = false;
+        [SerializeField] float twistSpeed = 1f;
 
         CinemachineCamera _vcam;
         Vector3 _right;
         Vector3 _forward;
         Vector2 _boundsMin;
         Vector2 _boundsMax;
+
+        // Input writes these targets; the rig eases toward them in LateUpdate.
+        Vector3 _targetPosition;
+        float _targetZoom;
+        Vector3 _panVelocity;   // SmoothDamp state (position)
+        float _zoomVelocity;    // SmoothDamp state (orthographic size)
 
         void Awake()
         {
@@ -53,102 +79,74 @@ namespace Nightwall
                 _boundsMin = new Vector2(-40f, -40f);
                 _boundsMax = new Vector2(40f, 40f);
             }
-        }
 
-        // Touch state for pan and pinch.
-        Vector2 _prevSingleTouch;
-        float _prevPinchDist;
-        bool _isPinching;
+            _targetPosition = Clamp(transform.position);
+            _targetZoom = Mathf.Clamp(_vcam.Lens.OrthographicSize, minZoom, maxZoom);
+        }
 
         void Update()
         {
-            if (Touchscreen.current != null && Touchscreen.current.touches.Count > 0)
-            {
-                HandleTouch();
-            }
-            else
-            {
-                HandleKeyboardMouse();
-            }
-        }
+            InputService input = InputService.Instance;
+            if (input == null) return;
 
-        void HandleTouch()
-        {
-            var touches = Touchscreen.current.touches;
-            int activeCount = 0;
-            for (int i = 0; i < touches.Count; i++)
-                if (touches[i].isInProgress) activeCount++;
+            // Gestures (touch two-finger drag / pinch / twist, and scroll wheel) from the abstraction.
+            if (input.PanDelta != Vector2.zero)
+                // Drag finger right → world moves left under the finger, so invert the pan.
+                PanByScreenDelta(-input.PanDelta);
 
-            if (activeCount == 1)
-            {
-                _isPinching = false;
-                var t0 = touches[0];
-                Vector2 pos = t0.position.ReadValue();
-                if (t0.phase.ReadValue() == UnityEngine.InputSystem.TouchPhase.Began)
-                {
-                    _prevSingleTouch = pos;
-                }
-                else if (t0.phase.ReadValue() == UnityEngine.InputSystem.TouchPhase.Moved)
-                {
-                    Vector2 delta = pos - _prevSingleTouch;
-                    // Invert: drag finger right moves camera right (world moves left under finger).
-                    PanByScreenDelta(-delta);
-                    _prevSingleTouch = pos;
-                }
-            }
-            else if (activeCount >= 2)
-            {
-                Vector2 p0 = Vector2.zero, p1 = Vector2.zero;
-                int found = 0;
-                for (int i = 0; i < touches.Count && found < 2; i++)
-                {
-                    if (touches[i].isInProgress) { if (found == 0) p0 = touches[i].position.ReadValue(); else p1 = touches[i].position.ReadValue(); found++; }
-                }
-                float dist = Vector2.Distance(p0, p1);
-                if (!_isPinching) { _prevPinchDist = dist; _isPinching = true; }
-                float pinchDelta = _prevPinchDist - dist;
-                if (Mathf.Abs(pinchDelta) > 0.5f)
-                {
-                    LensSettings lens = _vcam.Lens;
-                    lens.OrthographicSize = Mathf.Clamp(
-                        lens.OrthographicSize + pinchDelta * zoomSpeed * 0.02f, minZoom, maxZoom);
-                    _vcam.Lens = lens;
-                }
-                _prevPinchDist = dist;
-            }
-            else
-            {
-                _isPinching = false;
-            }
-        }
+            if (Mathf.Abs(input.PinchDelta) > 0.01f)
+                // Pinch apart (positive) zooms in → reduce the target orthographic size.
+                _targetZoom = Mathf.Clamp(
+                    _targetZoom - input.PinchDelta * zoomSpeed * 0.02f, minZoom, maxZoom);
 
-        void HandleKeyboardMouse()
-        {
-            _isPinching = false;
+            if (enableTwistRotation && Mathf.Abs(input.TwistDelta) > 0.01f)
+                Rotate(input.TwistDelta * twistSpeed);
+
+            // Keyboard / screen-edge panning stays for Editor development.
             Vector2 move = ReadKeyboardEdge();
             if (move.sqrMagnitude > 0.0001f)
             {
-                Vector3 delta = (_right * move.x + _forward * move.y).normalized * panSpeed * Time.deltaTime;
-                transform.position = Clamp(transform.position + delta);
-            }
-
-            float scroll = Mouse.current != null ? Mouse.current.scroll.ReadValue().y : 0f;
-            if (Mathf.Abs(scroll) > 0.01f)
-            {
-                LensSettings lens = _vcam.Lens;
-                lens.OrthographicSize = Mathf.Clamp(
-                    lens.OrthographicSize - scroll * zoomSpeed * 0.01f, minZoom, maxZoom);
-                _vcam.Lens = lens;
+                // Keyboard/edge speed tracks zoom so a pixel of travel feels the same at any scale.
+                float zoomScale = _targetZoom / maxZoom;
+                Vector3 delta = (_right * move.x + _forward * move.y).normalized
+                                * panSpeed * zoomScale * Time.deltaTime;
+                _targetPosition = Clamp(_targetPosition + delta);
             }
         }
 
-        /// <summary>Converts a screen-space pixel delta into a world-space camera pan.</summary>
+        /// <summary>Eases the rig toward the input-driven target position and zoom. Runs after all
+        /// input in <c>Update</c> so a frame's gestures are folded into one smoothed step.</summary>
+        void LateUpdate()
+        {
+            transform.position = panSmoothTime > 0f
+                ? Vector3.SmoothDamp(transform.position, _targetPosition, ref _panVelocity, panSmoothTime)
+                : _targetPosition;
+
+            LensSettings lens = _vcam.Lens;
+            lens.OrthographicSize = zoomSmoothTime > 0f
+                ? Mathf.SmoothDamp(lens.OrthographicSize, _targetZoom, ref _zoomVelocity, zoomSmoothTime)
+                : _targetZoom;
+            _vcam.Lens = lens;
+        }
+
+        /// <summary>Converts a screen-space pixel delta into a world-space pan of the camera target.</summary>
         void PanByScreenDelta(Vector2 screenDelta)
         {
             // Scale delta so one pixel matches one pixel of world movement at current zoom.
-            float unitsPerPixel = (_vcam.Lens.OrthographicSize * 2f) / Screen.height;
+            float unitsPerPixel = (_targetZoom * 2f) / Screen.height;
             Vector3 worldDelta = (_right * screenDelta.x + _forward * screenDelta.y) * unitsPerPixel;
-            transform.position = Clamp(transform.position + worldDelta);
+            _targetPosition = Clamp(_targetPosition + worldDelta);
+        }
+
+        /// <summary>Rotates the rig about the vertical axis and rebuilds the screen-relative pan basis
+        /// so WASD/edge panning still follows the new orientation.</summary>
+        void Rotate(float degrees)
+        {
+            transform.RotateAround(transform.position, Vector3.up, degrees);
+            _targetPosition = transform.position; // rotate pivots about the rig, so keep the target in sync
+            Quaternion yawOnly = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
+            _right = yawOnly * Vector3.right;
+            _forward = yawOnly * Vector3.forward;
         }
 
         Vector2 ReadKeyboardEdge()
