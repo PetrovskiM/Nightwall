@@ -28,11 +28,13 @@ namespace ProjectBootstrap
         // MapConfig lives under Resources so GridSystem can recover it at runtime even when the
         // binary-saved scene drops the serialized reference.
         const string ConfigDir = "Assets/Resources";
+        const string LevelsDir = ConfigDir + "/Levels";
         const string ScenePath = SceneDir + "/Nightwall.unity";
         const string MapConfigPath = ConfigDir + "/MapConfig.asset";
 
         static int _ground, _building;
         static EnemyDefinition _basicDef, _runnerDef, _bruteDef, _swarmDef;
+        static GameObject _wallPrefab, _reinforcedPrefab, _gatePrefab, _trapPrefab;
 
         [MenuItem("Nightwall/Rebuild Prototype Scene")]
         public static void Build()
@@ -42,6 +44,7 @@ namespace ProjectBootstrap
             EnsureFolder(PrefabDir);
             EnsureFolder(SceneDir);
             EnsureFolder(ConfigDir);
+            EnsureFolder(LevelsDir);
 
             _ground = EnsureLayer("Ground");
             _building = EnsureLayer("Building");
@@ -63,15 +66,17 @@ namespace ProjectBootstrap
             MakeEnemyDefinitions();
 
             GameObject enemyPrefab = BuildEnemyPrefab(enemyMat);
-            GameObject wallPrefab = BuildWallPrefab(wallMat);
-            GameObject reinforcedPrefab = BuildReinforcedWallPrefab(reinforcedMat);
-            GameObject gatePrefab = BuildGatePrefab(gateMat);
-            GameObject trapPrefab = BuildTrapPrefab(trapMat);
+            _wallPrefab       = BuildWallPrefab(wallMat);
+            _reinforcedPrefab = BuildReinforcedWallPrefab(reinforcedMat);
+            _gatePrefab       = BuildGatePrefab(gateMat);
+            _trapPrefab       = BuildTrapPrefab(trapMat);
 
             AssetDatabase.SaveAssets();
 
-            BuildScene(map, groundMat, hqMat, enemyPrefab, wallPrefab, reinforcedPrefab, gatePrefab,
-                trapPrefab, ghostMat, gridMat);
+            LevelRegistry registry = MakeLevelRegistry();
+
+            BuildScene(map, groundMat, hqMat, enemyPrefab, _wallPrefab, _reinforcedPrefab, _gatePrefab,
+                _trapPrefab, ghostMat, gridMat, registry);
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -218,7 +223,8 @@ namespace ProjectBootstrap
 
         static void BuildScene(MapConfig map, Material groundMat, Material hqMat,
             GameObject enemyPrefab, GameObject wallPrefab, GameObject reinforcedPrefab,
-            GameObject gatePrefab, GameObject trapPrefab, Material ghostMat, Material gridMat)
+            GameObject gatePrefab, GameObject trapPrefab, Material ghostMat, Material gridMat,
+            LevelRegistry registry)
         {
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -337,13 +343,15 @@ namespace ProjectBootstrap
             }
 
             // Game systems (no SelectionManager — the player never commands units).
+            // LevelLoader must be first so its Awake runs before GameManager/WaveSpawner/BuildingPlacer.
             // AttackDirectionSelector must be added before WaveSpawner (RequireComponent order).
             var systems = new GameObject("GameSystems");
-            var selector = systems.AddComponent<AttackDirectionSelector>();
-            var waveSpawner = systems.AddComponent<WaveSpawner>();
-            var gameManager = systems.AddComponent<GameManager>();
-            var placer = systems.AddComponent<BuildingPlacer>();
-            var buildBar = systems.AddComponent<BuildBar>();
+            var levelLoader  = systems.AddComponent<LevelLoader>();
+            var selector     = systems.AddComponent<AttackDirectionSelector>();
+            var waveSpawner  = systems.AddComponent<WaveSpawner>();
+            var gameManager  = systems.AddComponent<GameManager>();
+            var placer       = systems.AddComponent<BuildingPlacer>();
+            var buildBar     = systems.AddComponent<BuildBar>();
             systems.AddComponent<DevHud>();
 
             // Configure AttackDirectionSelector difficulty curves.
@@ -356,6 +364,14 @@ namespace ProjectBootstrap
             SetObject(selector, "map", map);
 
             // ----- Wire references via SerializedObject (robust for private [SerializeField]) -----
+
+            // LevelLoader: point at level 1 and pre-wire the systems it configures.
+            LevelDefinition level1 = registry != null ? registry.Get(0) : null;
+            SetObject(levelLoader, "currentLevel",   level1);
+            SetObject(levelLoader, "gameManager",    gameManager);
+            SetObject(levelLoader, "waveSpawner",    waveSpawner);
+            SetObject(levelLoader, "buildingPlacer", placer);
+
             SetObject(gameManager, "hq", hqComp);
             SetObject(gameManager, "waveSpawner", waveSpawner);
             SetObject(gameManager, "attackDirectionSelector", selector);
@@ -509,9 +525,194 @@ namespace ProjectBootstrap
             return 0;
         }
 
-        // LevelConfig lives under Resources (like MapConfig) so WaveSpawner can recover it at
-        // runtime even if the binary-saved scene drops the serialized reference.
+        // ── Level definitions ─────────────────────────────────────────────────
+
+        const string RegistryPath    = ConfigDir + "/LevelRegistry.asset";
+        // Legacy single LevelConfig kept for WaveSpawner fallback in Resources.
         const string LevelConfigPath = ConfigDir + "/LevelConfig.asset";
+
+        /// <summary>
+        /// Creates five <see cref="LevelDefinition"/> assets with escalating difficulty and
+        /// a <see cref="LevelRegistry"/> that references them in order. The scene's
+        /// <see cref="LevelLoader"/> is pointed at level 1 so the first play-session uses it.
+        ///
+        /// Level summary:
+        ///   1 Tutorial        — slow timings, Wall only,    N side,  3 waves, Basics.
+        ///   2 Pincer          — two sides,   +Gate,          5 waves, Basics + Runners.
+        ///   3 Three-Front     — three sides, +Reinforced,   7 waves, + Brutes.
+        ///   4 All-Front       — four sides,  full kit,      10 waves, all archetypes.
+        ///   5 Relentless      — four sides,  full kit,      infinite, hard ramp.
+        /// </summary>
+        static LevelRegistry MakeLevelRegistry()
+        {
+            // (name, number, dayDur, nightDur, dawnDur, waves, winCondition, structures[], waveConfig)
+            // We build each LevelConfig first, then wrap it in a LevelDefinition.
+
+            // Level 1 — Tutorial
+            LevelConfig cfg1 = MakeLevelConfigAsset("Level01Config",
+                new (float interval, (AttackSide side, int count, EnemyDefinition def)[] groups)[]
+                {
+                    (0.80f, new[] { (AttackSide.North, 4, _basicDef) }),
+                    (0.70f, new[] { (AttackSide.North, 6, _basicDef) }),
+                    (0.65f, new[] { (AttackSide.North, 8, _basicDef) }),
+                }, proceduralBase: 0, proceduralPerWave: 0, proceduralInterval: 0.6f);
+
+            // Level 2 — Pincer
+            LevelConfig cfg2 = MakeLevelConfigAsset("Level02Config",
+                new (float interval, (AttackSide side, int count, EnemyDefinition def)[] groups)[]
+                {
+                    (0.70f, new[] { (AttackSide.North, 5, _basicDef) }),
+                    (0.65f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.South, 5, _runnerDef) }),
+                    (0.60f, new[] { (AttackSide.North, 6, _basicDef), (AttackSide.South, 8, _runnerDef) }),
+                    (0.55f, new[] { (AttackSide.North, 8, _basicDef), (AttackSide.South, 10, _runnerDef) }),
+                    (0.50f, new[] { (AttackSide.North, 10, _basicDef), (AttackSide.South, 12, _runnerDef) }),
+                }, proceduralBase: 0, proceduralPerWave: 0, proceduralInterval: 0.5f);
+
+            // Level 3 — Three-Front
+            LevelConfig cfg3 = MakeLevelConfigAsset("Level03Config",
+                new (float interval, (AttackSide side, int count, EnemyDefinition def)[] groups)[]
+                {
+                    (0.65f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.South, 6, _runnerDef) }),
+                    (0.60f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.East, 6, _runnerDef) }),
+                    (0.55f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.East, 6, _runnerDef), (AttackSide.West, 2, _bruteDef) }),
+                    (0.50f, new[] { (AttackSide.North, 6, _basicDef), (AttackSide.East, 7, _runnerDef), (AttackSide.West, 3, _bruteDef) }),
+                    (0.48f, new[] { (AttackSide.North, 8, _basicDef), (AttackSide.East, 10, _runnerDef), (AttackSide.West, 4, _bruteDef) }),
+                    (0.45f, new[] { (AttackSide.North, 10, _basicDef), (AttackSide.East, 12, _runnerDef), (AttackSide.West, 5, _bruteDef) }),
+                    (0.42f, new[] { (AttackSide.North, 12, _basicDef), (AttackSide.East, 14, _runnerDef), (AttackSide.West, 6, _bruteDef) }),
+                }, proceduralBase: 0, proceduralPerWave: 0, proceduralInterval: 0.4f);
+
+            // Level 4 — All-Front
+            LevelConfig cfg4 = MakeLevelConfigAsset("Level04Config",
+                new (float interval, (AttackSide side, int count, EnemyDefinition def)[] groups)[]
+                {
+                    (0.60f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.South, 6, _runnerDef), (AttackSide.East, 2, _bruteDef) }),
+                    (0.55f, new[] { (AttackSide.North, 6, _basicDef), (AttackSide.South, 8, _runnerDef), (AttackSide.East, 2, _bruteDef), (AttackSide.West, 10, _swarmDef) }),
+                    (0.50f, new[] { (AttackSide.North, 7, _basicDef), (AttackSide.South, 10, _runnerDef), (AttackSide.East, 3, _bruteDef), (AttackSide.West, 14, _swarmDef) }),
+                    (0.48f, new[] { (AttackSide.North, 8, _basicDef), (AttackSide.South, 12, _runnerDef), (AttackSide.East, 4, _bruteDef), (AttackSide.West, 18, _swarmDef) }),
+                    (0.45f, new[] { (AttackSide.North, 10, _basicDef), (AttackSide.South, 14, _runnerDef), (AttackSide.East, 5, _bruteDef), (AttackSide.West, 22, _swarmDef) }),
+                    (0.43f, new[] { (AttackSide.North, 12, _basicDef), (AttackSide.South, 16, _runnerDef), (AttackSide.East, 6, _bruteDef), (AttackSide.West, 24, _swarmDef) }),
+                    (0.40f, new[] { (AttackSide.North, 14, _basicDef), (AttackSide.South, 18, _runnerDef), (AttackSide.East, 7, _bruteDef), (AttackSide.West, 26, _swarmDef) }),
+                    (0.38f, new[] { (AttackSide.North, 16, _basicDef), (AttackSide.South, 20, _runnerDef), (AttackSide.East, 8, _bruteDef), (AttackSide.West, 28, _swarmDef) }),
+                    (0.36f, new[] { (AttackSide.North, 18, _basicDef), (AttackSide.South, 22, _runnerDef), (AttackSide.East, 9, _bruteDef), (AttackSide.West, 30, _swarmDef) }),
+                    (0.34f, new[] { (AttackSide.North, 20, _basicDef), (AttackSide.South, 24, _runnerDef), (AttackSide.East, 10, _bruteDef), (AttackSide.West, 32, _swarmDef) }),
+                }, proceduralBase: 0, proceduralPerWave: 0, proceduralInterval: 0.35f);
+
+            // Level 5 — Relentless (infinite, hard ramp)
+            LevelConfig cfg5 = MakeLevelConfigAsset("Level05Config",
+                new (float interval, (AttackSide side, int count, EnemyDefinition def)[] groups)[]
+                {
+                    (0.55f, new[] { (AttackSide.North, 8, _basicDef), (AttackSide.South, 10, _runnerDef), (AttackSide.East, 3, _bruteDef), (AttackSide.West, 16, _swarmDef) }),
+                    (0.50f, new[] { (AttackSide.North, 10, _basicDef), (AttackSide.South, 14, _runnerDef), (AttackSide.East, 4, _bruteDef), (AttackSide.West, 20, _swarmDef) }),
+                    (0.45f, new[] { (AttackSide.North, 12, _basicDef), (AttackSide.South, 18, _runnerDef), (AttackSide.East, 5, _bruteDef), (AttackSide.West, 24, _swarmDef) }),
+                    (0.42f, new[] { (AttackSide.North, 15, _basicDef), (AttackSide.South, 22, _runnerDef), (AttackSide.East, 7, _bruteDef), (AttackSide.West, 30, _swarmDef) }),
+                    (0.40f, new[] { (AttackSide.North, 18, _basicDef), (AttackSide.South, 26, _runnerDef), (AttackSide.East, 9, _bruteDef), (AttackSide.West, 36, _swarmDef) }),
+                }, proceduralBase: 14, proceduralPerWave: 5, proceduralInterval: 0.38f);
+
+            // ── Build LevelDefinitions ───────────────────────────────────────
+
+            GameObject[] wallOnly        = { _wallPrefab };
+            GameObject[] wallGate        = { _wallPrefab, _gatePrefab };
+            GameObject[] wallGateReinf   = { _wallPrefab, _reinforcedPrefab, _gatePrefab };
+            GameObject[] fullKit         = { _wallPrefab, _reinforcedPrefab, _gatePrefab, _trapPrefab };
+
+            LevelDefinition lv1 = MakeLevelDefinition("Level_01", "Tutorial",         1,  60, 60, 80f, 150f, 5f, 3,  WinConditionType.SurviveAllWaves, 150, wallOnly,      cfg1);
+            LevelDefinition lv2 = MakeLevelDefinition("Level_02", "Pincer",           2,  60, 60, 60f, 120f, 5f, 5,  WinConditionType.SurviveAllWaves, 120, wallGate,      cfg2);
+            LevelDefinition lv3 = MakeLevelDefinition("Level_03", "Three-Front",      3,  60, 60, 45f, 120f, 4f, 7,  WinConditionType.SurviveAllWaves, 100, wallGateReinf, cfg3);
+            LevelDefinition lv4 = MakeLevelDefinition("Level_04", "All-Front",        4,  60, 60, 35f, 100f, 4f, 10, WinConditionType.SurviveAllWaves,  80, fullKit,       cfg4);
+            LevelDefinition lv5 = MakeLevelDefinition("Level_05", "Relentless",       5,  60, 60, 30f,  90f, 4f,  0, WinConditionType.Infinite,          60, fullKit,       cfg5);
+
+            // ── Build LevelRegistry ──────────────────────────────────────────
+
+            var reg = AssetDatabase.LoadAssetAtPath<LevelRegistry>(RegistryPath);
+            if (reg == null)
+            {
+                reg = ScriptableObject.CreateInstance<LevelRegistry>();
+                AssetDatabase.CreateAsset(reg, RegistryPath);
+            }
+            var regSo = new SerializedObject(reg);
+            var levList = regSo.FindProperty("levels");
+            LevelDefinition[] defs = { lv1, lv2, lv3, lv4, lv5 };
+            levList.arraySize = defs.Length;
+            for (int i = 0; i < defs.Length; i++)
+                levList.GetArrayElementAtIndex(i).objectReferenceValue = defs[i];
+            regSo.ApplyModifiedProperties();
+            EditorUtility.SetDirty(reg);
+            return reg;
+        }
+
+        static LevelDefinition MakeLevelDefinition(string file, string displayName, int number,
+            int gridW, int gridH, float dayDur, float nightDur, float dawnDur, int waves,
+            WinConditionType winCond, int startMats, GameObject[] structures, LevelConfig waveCfg)
+        {
+            string path = $"{LevelsDir}/{file}.asset";
+            var def = AssetDatabase.LoadAssetAtPath<LevelDefinition>(path);
+            if (def == null)
+            {
+                def = ScriptableObject.CreateInstance<LevelDefinition>();
+                AssetDatabase.CreateAsset(def, path);
+            }
+            var so = new SerializedObject(def);
+            so.FindProperty("displayName").stringValue      = displayName;
+            so.FindProperty("levelNumber").intValue         = number;
+            so.FindProperty("gridWidth").intValue           = gridW;
+            so.FindProperty("gridHeight").intValue          = gridH;
+            so.FindProperty("hqGridPosition").vector2IntValue = new Vector2Int(gridW / 2, gridH / 2);
+            so.FindProperty("startingMaterials").intValue   = startMats;
+            so.FindProperty("dayDuration").floatValue       = dayDur;
+            so.FindProperty("nightMaxDuration").floatValue  = nightDur;
+            so.FindProperty("dawnDuration").floatValue      = dawnDur;
+            so.FindProperty("numberOfWaves").intValue       = waves;
+            so.FindProperty("waveConfig").objectReferenceValue = waveCfg;
+            so.FindProperty("winCondition").enumValueIndex  = (int)winCond;
+
+            var structProp = so.FindProperty("availableStructures");
+            structProp.arraySize = structures.Length;
+            for (int i = 0; i < structures.Length; i++)
+                structProp.GetArrayElementAtIndex(i).objectReferenceValue = structures[i];
+
+            so.ApplyModifiedProperties();
+            EditorUtility.SetDirty(def);
+            return def;
+        }
+
+        /// <summary>Creates a per-level <see cref="LevelConfig"/> asset under Resources/Levels/.</summary>
+        static LevelConfig MakeLevelConfigAsset(string file,
+            (float interval, (AttackSide side, int count, EnemyDefinition def)[] groups)[] waves,
+            int proceduralBase, int proceduralPerWave, float proceduralInterval)
+        {
+            string path = $"{LevelsDir}/{file}.asset";
+            var cfg = AssetDatabase.LoadAssetAtPath<LevelConfig>(path);
+            if (cfg == null)
+            {
+                cfg = ScriptableObject.CreateInstance<LevelConfig>();
+                AssetDatabase.CreateAsset(cfg, path);
+            }
+            var so = new SerializedObject(cfg);
+            var wavesProp = so.FindProperty("waves");
+            wavesProp.arraySize = waves.Length;
+            for (int w = 0; w < waves.Length; w++)
+            {
+                var wp = wavesProp.GetArrayElementAtIndex(w);
+                wp.FindPropertyRelative("spawnInterval").floatValue = waves[w].interval;
+                var gp = wp.FindPropertyRelative("groups");
+                var groups = waves[w].groups;
+                gp.arraySize = groups.Length;
+                for (int g = 0; g < groups.Length; g++)
+                {
+                    var ep = gp.GetArrayElementAtIndex(g);
+                    ep.FindPropertyRelative("side").enumValueIndex     = (int)groups[g].side;
+                    ep.FindPropertyRelative("count").intValue          = groups[g].count;
+                    ep.FindPropertyRelative("enemyDefinition").objectReferenceValue = groups[g].def;
+                }
+            }
+            so.FindProperty("proceduralBaseCount").intValue    = proceduralBase;
+            so.FindProperty("proceduralCountPerWave").intValue = proceduralPerWave;
+            so.FindProperty("proceduralSpawnInterval").floatValue = proceduralInterval;
+            so.ApplyModifiedProperties();
+            EditorUtility.SetDirty(cfg);
+            return cfg;
+        }
+
 
         /// <summary>
         /// Author a handful of escalating nights, then leave the rest to the procedural fallback.

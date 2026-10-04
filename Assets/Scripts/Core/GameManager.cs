@@ -113,6 +113,17 @@ namespace Nightwall
             StateChanged?.Invoke(state);
         }
 
+        /// <summary>
+        /// Applied by <see cref="LevelLoader"/> in <c>Awake</c>, before <c>Start</c> runs.
+        /// Overrides the serialized phase durations with values from the level definition.
+        /// </summary>
+        public void Configure(LevelDefinition level)
+        {
+            dayDuration      = level.DayDuration;
+            nightMaxDuration = level.NightMaxDuration;
+            dawnDuration     = level.DawnDuration;
+        }
+
         /// <summary>Called by the <see cref="Hq"/> when its <see cref="Health"/> reaches zero.</summary>
         public void OnHqDestroyed()
         {

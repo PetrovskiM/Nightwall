@@ -50,6 +50,15 @@ namespace Nightwall
             if (defaultDefinition == null) defaultDefinition = Resources.Load<EnemyDefinition>("Enemy_Basic");
         }
 
+        /// <summary>
+        /// Applied by <see cref="LevelLoader"/> in <c>Awake</c>. Replaces the serialized
+        /// <see cref="LevelConfig"/> with the level's own wave schedule.
+        /// </summary>
+        public void Configure(LevelConfig config)
+        {
+            if (config != null) levelConfig = config;
+        }
+
         /// <summary>Spawn the wave for the given 1-based wave number. Call after <see cref="AttackDirectionSelector.SelectForWave"/>.</summary>
         public void SpawnWave(int waveNumber)
         {

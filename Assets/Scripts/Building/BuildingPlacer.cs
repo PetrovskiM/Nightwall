@@ -140,6 +140,18 @@ namespace Nightwall
         // ── Public API ────────────────────────────────────────────────────────
 
         /// <summary>Enters build mode for the given buildable index. Called by UI buttons.</summary>
+        /// <summary>
+        /// Applied by <see cref="LevelLoader"/> in <c>Awake</c>. Replaces the serialized
+        /// buildables list so levels can restrict or expand the build palette.
+        /// </summary>
+        public void Configure(System.Collections.Generic.IReadOnlyList<GameObject> structures)
+        {
+            buildables.Clear();
+            foreach (var s in structures)
+                if (s != null) buildables.Add(s);
+            _index = 0;
+        }
+
         public void ActivateForIndex(int index)
         {
             _index = Mathf.Clamp(index, 0, buildables.Count - 1);
