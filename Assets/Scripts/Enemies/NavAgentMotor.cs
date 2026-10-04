@@ -14,6 +14,8 @@ namespace Nightwall
         [SerializeField] float moveSpeed = 3.5f;
 
         NavMeshAgent _agent;
+        // Reused across filtered path requests to avoid allocating a new NavMeshPath each call.
+        readonly NavMeshPath _filteredPath = new NavMeshPath();
 
         public float MoveSpeed
         {
@@ -42,6 +44,23 @@ namespace Nightwall
             if (_agent == null || !_agent.isOnNavMesh) return;
             if (_agent.isStopped) _agent.isStopped = false;
             _agent.SetDestination(worldPos);
+        }
+
+        /// <summary>
+        /// Path toward <paramref name="worldPos"/> using a <see cref="NavMeshQueryFilter"/> so
+        /// per-agent area costs are honoured (e.g. a Brute that avoids "NearWall" areas). Falls back
+        /// to <see cref="SetDestination"/> when path calculation fails. No-op while off NavMesh.
+        /// </summary>
+        public void SetDestinationFiltered(Vector3 worldPos, NavMeshQueryFilter filter)
+        {
+            if (_agent == null || !_agent.isOnNavMesh) return;
+            if (_agent.isStopped) _agent.isStopped = false;
+
+            _filteredPath.ClearCorners();
+            if (NavMesh.CalculatePath(transform.position, worldPos, filter, _filteredPath))
+                _agent.SetPath(_filteredPath);
+            else
+                _agent.SetDestination(worldPos); // graceful fallback: no path found for filter
         }
 
         /// <summary>Halt in place (e.g. while attacking a blocking structure).</summary>

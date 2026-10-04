@@ -48,6 +48,10 @@ namespace Nightwall
         AttackEffect _attackEffect;
         // The archetype applied at spawn (null => the prefab's serialized fallback stats are used).
         EnemyDefinition _definition;
+        // Built from EnemyDefinition.NavCostOverrides; used by SetDestinationFiltered so each
+        // archetype can prefer or avoid particular NavMesh areas without touching the global costs.
+        NavMeshQueryFilter _navFilter;
+        bool _hasNavFilter;
         // Base agent footprint captured in Awake, so an archetype's size can scale from the authored
         // prefab values rather than compounding if ApplyDefinition is ever called more than once.
         float _baseAgentRadius, _baseAgentHeight;
@@ -122,7 +126,30 @@ namespace Nightwall
             _agent.radius = _baseAgentRadius * size;
             _agent.height = _baseAgentHeight * size;
 
+            ApplyNavCostProfile(definition);
             ApplyAppearance(definition);
+        }
+
+        /// <summary>
+        /// Build a <see cref="NavMeshQueryFilter"/> from the archetype's area cost overrides so this
+        /// agent's paths honour per-archetype traversal preferences without changing global NavMesh
+        /// costs. Leaves <see cref="_hasNavFilter"/> false for archetypes with no overrides so the
+        /// hot path (Basic enemies) continues to call <c>NavMeshAgent.SetDestination</c> directly.
+        /// </summary>
+        void ApplyNavCostProfile(EnemyDefinition definition)
+        {
+            _hasNavFilter = false;
+            if (!definition.HasNavCostOverrides) return;
+
+            _navFilter = new NavMeshQueryFilter
+            {
+                agentTypeID = _agent.agentTypeID,
+                areaMask    = NavMesh.AllAreas,
+            };
+            foreach (NavAreaCostOverride o in definition.NavCostOverrides)
+                _navFilter.SetAreaCost(o.areaIndex, o.costMultiplier);
+
+            _hasNavFilter = true;
         }
 
         /// <summary>
@@ -161,7 +188,7 @@ namespace Nightwall
             if (_hq != null && NavMesh.SamplePosition(_hq.position, out NavMeshHit hit, 6f, NavMesh.AllAreas))
                 _hqNavPoint = hit.position;
 
-            _motor.SetDestination(_hqNavPoint);
+            RequestPath();
             // Desync repaths so the whole horde doesn't recompute on the same frame.
             _repathTimer = UnityEngine.Random.Range(0f, repathInterval);
         }
@@ -195,7 +222,7 @@ namespace Nightwall
             {
                 _repathTimer = repathInterval;
                 _walledOut = ComputeWalledOut();       // judge the current, settled path first
-                _motor.SetDestination(_hqNavPoint);    // then request a fresh one
+                RequestPath();                         // then request a fresh one
             }
 
             // Only break walls when there is genuinely NO complete route to the base.
@@ -213,6 +240,19 @@ namespace Nightwall
 
             ClearTargetWall();
             _motor.Resume();
+        }
+
+        /// <summary>
+        /// Issues a path request to <see cref="_hqNavPoint"/>, using the archetype's
+        /// <see cref="NavMeshQueryFilter"/> when one was built from cost overrides, or the plain
+        /// <see cref="NavMeshAgent.SetDestination"/> for archetypes with no overrides (zero extra cost).
+        /// </summary>
+        void RequestPath()
+        {
+            if (_hasNavFilter)
+                _motor.SetDestinationFiltered(_hqNavPoint, _navFilter);
+            else
+                _motor.SetDestination(_hqNavPoint);
         }
 
         /// <summary>
