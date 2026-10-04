@@ -132,6 +132,7 @@ namespace ProjectBootstrap
             root.AddComponent<NavAgentMotor>();
             root.AddComponent<AttackEffect>();
             root.AddComponent<Enemy>();
+            root.AddComponent<EnemyDeathEffect>();
 
             return SavePrefab(root, "Enemy");
         }
@@ -153,6 +154,8 @@ namespace ProjectBootstrap
             // Carve slightly past the cell so two diagonally-placed walls overlap at their shared
             // corner and seal the pinch — otherwise the horde slips through the diagonal gap.
             AddCarvingObstacle(root, new Vector3(1.1f, 1.6f, 1.1f));
+            root.AddComponent<StructureDamageVisual>();
+            root.AddComponent<DestructionEffect>();
 
             return SavePrefab(root, "Wall");
         }
@@ -173,6 +176,8 @@ namespace ProjectBootstrap
             SetString(structure, "displayName", "Reinforced");
             SetInt(structure, "cost", 40);
             AddCarvingObstacle(root, new Vector3(1.1f, 2.0f, 1.1f));
+            root.AddComponent<StructureDamageVisual>();
+            root.AddComponent<DestructionEffect>();
 
             return SavePrefab(root, "ReinforcedWall");
         }
@@ -193,6 +198,8 @@ namespace ProjectBootstrap
             var gate = root.AddComponent<Gate>();
             SetString(gate, "displayName", "Gate");
             SetInt(gate, "cost", 25);
+            root.AddComponent<StructureDamageVisual>();
+            root.AddComponent<DestructionEffect>();
 
             return SavePrefab(root, "Gate");
         }
@@ -215,6 +222,8 @@ namespace ProjectBootstrap
             SetString(structure, "displayName", "Trap");
             SetInt(structure, "cost", 15);
             root.AddComponent<Trap>();
+            root.AddComponent<StructureDamageVisual>();
+            root.AddComponent<DestructionEffect>();
 
             return SavePrefab(root, "Trap");
         }
@@ -265,6 +274,7 @@ namespace ProjectBootstrap
             // Placeholder base health bar: reads the HQ's Health only, floats above the core.
             var hqBar = hq.AddComponent<HqHealthBar>();
             SetFloat(hqBar, "heightOffset", 3.5f);
+            hq.AddComponent<HqDamageEffects>();
 
             // Mark the outer perimeter band as "NearWall" (NavMesh area 3) so archetypes that have
             // a high cost for that area (e.g. Brutes) prefer interior routes instead of hugging
@@ -312,6 +322,7 @@ namespace ProjectBootstrap
             vcam.Lens = lens;
             var camCtrl = vcamGo.AddComponent<IsoCameraController>();
             SetObject(camCtrl, "map", map);
+            vcamGo.AddComponent<ScreenShake>();
 
             // Entrances around the whole perimeter — four edge midpoints and four corners — so the
             // horde can be made to attack from any combination of directions (inset so they sit on
@@ -354,6 +365,9 @@ namespace ProjectBootstrap
             var buildBar     = systems.AddComponent<BuildBar>();
             systems.AddComponent<DevHud>();
             systems.AddComponent<WavePreviewHud>();
+            systems.AddComponent<AudioSource>();   // required by AudioManager
+            systems.AddComponent<AudioManager>();
+            systems.AddComponent<GameAudioHooks>();
 
             // Configure AttackDirectionSelector difficulty curves.
             // Min active sides: 1 all the way through (even late waves can be 1-side).

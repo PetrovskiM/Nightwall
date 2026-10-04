@@ -30,6 +30,7 @@ namespace Nightwall
             if (motor == null || _baseSpeed.ContainsKey(motor)) return;
             _baseSpeed[motor] = motor.MoveSpeed;
             motor.MoveSpeed = motor.MoveSpeed * slowMultiplier;
+            AudioManager.Instance?.PlayTrapActivation();
         }
 
         void OnTriggerExit(Collider other)
