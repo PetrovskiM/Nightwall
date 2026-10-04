@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ff11d91c21b0a462dab29057aca66926, type: 3}
+  m_Name: Level_02
+  m_EditorClassIdentifier: 
+  displayName: Pincer
+  levelNumber: 2
+  gridWidth: 60
+  gridHeight: 60
+  hqGridPosition: {x: 30, y: 30}
+  startingMaterials: 320
+  dayDuration: 60
+  nightMaxDuration: 50
+  dawnDuration: 5
+  numberOfWaves: 5
+  waveConfig: {fileID: 11400000, guid: 7a3f333a36b1b41c7bd7dd70502a5d72, type: 2}
+  availableStructures:
+  - {fileID: 8420380576475685154, guid: 6cc87cb369c6642d0860e5d6dfb0c277, type: 3}
+  - {fileID: 3717399339952286702, guid: 1970b19bc930949ddb6bb457dd3a65c8, type: 3}
+  winCondition: 0

@@ -148,6 +148,7 @@ namespace ProjectBootstrap
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 120f);
             root.AddComponent<Buildable>();
+            root.AddComponent<BuildModeXray>();
             var structure = root.AddComponent<DefensiveStructure>();
             SetString(structure, "displayName", "Wall");
             SetInt(structure, "cost", 10);
@@ -172,6 +173,7 @@ namespace ProjectBootstrap
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 500f);
             root.AddComponent<Buildable>();
+            root.AddComponent<BuildModeXray>();
             var structure = root.AddComponent<DefensiveStructure>();
             SetString(structure, "displayName", "Reinforced");
             SetInt(structure, "cost", 40);
@@ -193,6 +195,7 @@ namespace ProjectBootstrap
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 200f);
             root.AddComponent<Buildable>();
+            root.AddComponent<BuildModeXray>();
             // Carve like a wall while closed; Gate lifts the obstacle (and sinks the visual) when open.
             AddCarvingObstacle(root, new Vector3(1.1f, 1.4f, 1.1f));
             var gate = root.AddComponent<Gate>();
@@ -218,6 +221,7 @@ namespace ProjectBootstrap
             var health = root.AddComponent<Health>();
             SetFloat(health, "maxHealth", 100f);
             root.AddComponent<Buildable>();
+            root.AddComponent<BuildModeXray>();
             var structure = root.AddComponent<DefensiveStructure>();
             SetString(structure, "displayName", "Trap");
             SetInt(structure, "cost", 15);
@@ -271,6 +275,7 @@ namespace ProjectBootstrap
             var hqHealth = hq.AddComponent<Health>();
             SetFloat(hqHealth, "maxHealth", 1000f);
             var hqComp = hq.AddComponent<Hq>();
+            hq.AddComponent<BuildModeXray>();   // see-through while building so cells behind it read
             // Placeholder base health bar: reads the HQ's Health only, floats above the core.
             var hqBar = hq.AddComponent<HqHealthBar>();
             SetFloat(hqBar, "heightOffset", 3.5f);
@@ -300,6 +305,12 @@ namespace ProjectBootstrap
             overlayRenderer.receiveShadows = false;
             var overlay = overlayGo.AddComponent<GridOverlay>();
             SetObject(overlay, "config", map);
+
+            // Cell highlighter: a single quad that marks the targeted build cell (green/red).
+            var highlightGo = new GameObject("CellHighlighter");
+            highlightGo.AddComponent<MeshFilter>();
+            highlightGo.AddComponent<MeshRenderer>();
+            var cellHighlighter = highlightGo.AddComponent<CellHighlighter>();
 
             // Camera rig: Main Camera (Brain) + an orthographic iso CinemachineCamera.
             var camGo = new GameObject("Main Camera");
@@ -357,13 +368,15 @@ namespace ProjectBootstrap
             // LevelLoader must be first so its Awake runs before GameManager/WaveSpawner/BuildingPlacer.
             // AttackDirectionSelector must be added before WaveSpawner (RequireComponent order).
             var systems = new GameObject("GameSystems");
+            systems.AddComponent<InputService>();   // input abstraction; runs before gameplay reads it
             var levelLoader  = systems.AddComponent<LevelLoader>();
             var selector     = systems.AddComponent<AttackDirectionSelector>();
             var waveSpawner  = systems.AddComponent<WaveSpawner>();
             var gameManager  = systems.AddComponent<GameManager>();
             var placer       = systems.AddComponent<BuildingPlacer>();
+            systems.AddComponent<MaterialBank>();   // build economy; grants income each night survived
             var buildBar     = systems.AddComponent<BuildBar>();
-            systems.AddComponent<DevHud>();
+            var gameplayHud  = systems.AddComponent<GameplayHud>();   // main HUD (absorbs the old DevHud)
             systems.AddComponent<WavePreviewHud>();
             systems.AddComponent<AudioSource>();   // required by AudioManager
             systems.AddComponent<AudioManager>();
@@ -401,8 +414,13 @@ namespace ProjectBootstrap
             SetMask(placer, "groundMask", _ground);
             SetMask(placer, "buildingMask", _building);
             SetObject(placer, "ghostMaterial", ghostMat);
+            SetObject(placer, "cellHighlighter", cellHighlighter);
 
             SetObject(buildBar, "placer", placer);
+
+            SetObject(gameplayHud, "placer", placer);
+            SetObject(gameplayHud, "waveSpawner", waveSpawner);
+            SetObject(gameplayHud, "hqHealth", hqHealth);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -630,11 +648,11 @@ namespace ProjectBootstrap
             GameObject[] wallGateReinf   = { _wallPrefab, _reinforcedPrefab, _gatePrefab };
             GameObject[] fullKit         = { _wallPrefab, _reinforcedPrefab, _gatePrefab, _trapPrefab };
 
-            LevelDefinition lv1 = MakeLevelDefinition("Level_01", "Tutorial",         1,  60, 60, 80f, 150f, 5f, 3,  WinConditionType.SurviveAllWaves, 150, wallOnly,      cfg1);
-            LevelDefinition lv2 = MakeLevelDefinition("Level_02", "Pincer",           2,  60, 60, 60f, 120f, 5f, 5,  WinConditionType.SurviveAllWaves, 120, wallGate,      cfg2);
-            LevelDefinition lv3 = MakeLevelDefinition("Level_03", "Three-Front",      3,  60, 60, 45f, 120f, 4f, 7,  WinConditionType.SurviveAllWaves, 100, wallGateReinf, cfg3);
-            LevelDefinition lv4 = MakeLevelDefinition("Level_04", "All-Front",        4,  60, 60, 35f, 100f, 4f, 10, WinConditionType.SurviveAllWaves,  80, fullKit,       cfg4);
-            LevelDefinition lv5 = MakeLevelDefinition("Level_05", "Relentless",       5,  60, 60, 30f,  90f, 4f,  0, WinConditionType.Infinite,          60, fullKit,       cfg5);
+            LevelDefinition lv1 = MakeLevelDefinition("Level_01", "Tutorial",         1,  60, 60, 70f, 50f, 5f, 3,  WinConditionType.SurviveAllWaves, 400, wallOnly,      cfg1);
+            LevelDefinition lv2 = MakeLevelDefinition("Level_02", "Pincer",           2,  60, 60, 60f, 50f, 5f, 5,  WinConditionType.SurviveAllWaves, 320, wallGate,      cfg2);
+            LevelDefinition lv3 = MakeLevelDefinition("Level_03", "Three-Front",      3,  60, 60, 50f, 55f, 4f, 7,  WinConditionType.SurviveAllWaves, 260, wallGateReinf, cfg3);
+            LevelDefinition lv4 = MakeLevelDefinition("Level_04", "All-Front",        4,  60, 60, 40f, 55f, 4f, 10, WinConditionType.SurviveAllWaves, 210, fullKit,       cfg4);
+            LevelDefinition lv5 = MakeLevelDefinition("Level_05", "Relentless",       5,  60, 60, 35f, 50f, 4f,  0, WinConditionType.Infinite,         170, fullKit,       cfg5);
 
             // ── Build LevelRegistry ──────────────────────────────────────────
 

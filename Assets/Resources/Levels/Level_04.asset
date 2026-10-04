@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ff11d91c21b0a462dab29057aca66926, type: 3}
+  m_Name: Level_04
+  m_EditorClassIdentifier: 
+  displayName: All-Front
+  levelNumber: 4
+  gridWidth: 60
+  gridHeight: 60
+  hqGridPosition: {x: 30, y: 30}
+  startingMaterials: 210
+  dayDuration: 40
+  nightMaxDuration: 55
+  dawnDuration: 4
+  numberOfWaves: 10
+  waveConfig: {fileID: 11400000, guid: d5e975bae405e4b0292816f7e7f42cc1, type: 2}
+  availableStructures:
+  - {fileID: 8420380576475685154, guid: 6cc87cb369c6642d0860e5d6dfb0c277, type: 3}
+  - {fileID: 5983996489765262940, guid: 26d2b6c43c55f4b53812c1df558d609e, type: 3}
+  - {fileID: 3717399339952286702, guid: 1970b19bc930949ddb6bb457dd3a65c8, type: 3}
+  - {fileID: 4820535055807376955, guid: e9ee598a8a841469e8697e8493672825, type: 3}
+  winCondition: 0
