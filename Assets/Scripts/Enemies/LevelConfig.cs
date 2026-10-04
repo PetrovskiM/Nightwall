@@ -4,28 +4,29 @@ using UnityEngine;
 namespace Nightwall
 {
     /// <summary>
-    /// How many enemies a single <see cref="SpawnPoint"/> contributes to one wave. The index refers
-    /// into the <see cref="WaveSpawner"/>'s ordered spawn-point list, so a wave can light up any
-    /// subset of entrances with its own count at each.
+    /// How many enemies pour in from one attack side during a wave. The <see cref="AttackSide"/>
+    /// is used as an authored hint only: <see cref="AttackDirectionSelector"/> always makes the
+    /// final runtime decision about which sides are active each night, overriding any authored list.
+    /// Author groups here mainly to control per-side enemy counts and archetypes.
     /// </summary>
     [Serializable]
     public struct SpawnGroup
     {
-        [Tooltip("Index into the spawner's spawn-point list that this group pours from.")]
-        [Min(0)] public int spawnPointIndex;
-        [Tooltip("How many enemies this entrance contributes to the wave.")]
+        [Tooltip("Which map edge this group comes from (runtime selection may override this).")]
+        public AttackSide side;
+        [Tooltip("How many enemies this side contributes to the wave.")]
         [Min(0)] public int count;
         [Tooltip("Which archetype this group fields. Leave empty to use the spawner's default.")]
         public EnemyDefinition enemyDefinition;
     }
 
-    /// <summary>One authored night: which entrances are active, how many enemies each, and the cadence.</summary>
+    /// <summary>One authored night: enemy counts per side and spawn cadence.</summary>
     [Serializable]
     public struct WaveDefinition
     {
         [Tooltip("Seconds between individual enemy spawns during this wave.")]
         [Min(0.01f)] public float spawnInterval;
-        [Tooltip("The active entrances for this wave and their per-entrance enemy counts.")]
+        [Tooltip("Per-side groups for this wave. Sides not listed contribute 0 enemies.")]
         public SpawnGroup[] groups;
     }
 

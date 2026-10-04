@@ -20,6 +20,7 @@ namespace Nightwall
         [Header("References")]
         [SerializeField] Hq hq;
         [SerializeField] WaveSpawner waveSpawner;
+        [SerializeField] AttackDirectionSelector attackDirectionSelector;
 
         [Header("Phase durations (seconds)")]
         [Tooltip("How long the player has to build before the horde arrives.")]
@@ -87,6 +88,10 @@ namespace Nightwall
         {
             Enter(GameState.Night);
             PhaseTimeRemaining = nightMaxDuration;
+
+            // Select attack sides first (hidden during day, revealed now at nightfall).
+            if (attackDirectionSelector != null) attackDirectionSelector.SelectForWave(Day);
+
             if (waveSpawner != null) waveSpawner.SpawnWave(Day);
 
             while (State != GameState.GameOver && PhaseTimeRemaining > 0f)

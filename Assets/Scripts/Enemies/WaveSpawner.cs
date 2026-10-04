@@ -1,61 +1,67 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace Nightwall
 {
     /// <summary>
-    /// Spawns a single night's wave from one or more <see cref="SpawnPoint"/> entrances around the
-    /// map. The <see cref="GameManager"/> owns the day/night loop and calls <see cref="SpawnWave"/>
-    /// at nightfall; this component only produces the horde, decides which entrances are active and
-    /// how many each contributes (from the <see cref="LevelConfig"/>), and tracks how many enemies
-    /// remain alive so the night can resolve.
+    /// Spawns a single night's wave from whichever sides <see cref="AttackDirectionSelector"/>
+    /// has chosen for this night. The <see cref="GameManager"/> owns the day/night loop: it calls
+    /// <see cref="AttackDirectionSelector.SelectForWave"/> first (revealing the direction at
+    /// nightfall), then calls <see cref="SpawnWave"/> here to produce the horde.
     ///
-    /// Routing is not scripted here: each entrance drops its enemies at a different edge and the
-    /// enemy's own NavMesh pathing closes on the base, so a multi-entrance wave is felt as pressure
-    /// from several directions at once.
+    /// Enemy counts and spawn cadence come from <see cref="LevelConfig"/>; spawn *positions* come
+    /// from <see cref="AttackDirectionSelector"/>, which distributes the budget across active sides
+    /// using randomised positions along each edge. The "maze" emerges from NavMesh rerouting around
+    /// whatever walls the player placed — no scripted lanes.
     /// </summary>
+    [RequireComponent(typeof(AttackDirectionSelector))]
     public class WaveSpawner : MonoBehaviour
     {
         [SerializeField] GameObject enemyPrefab;
-        [Tooltip("Every entrance on this map, in a stable order. Waves reference them by index.")]
-        [SerializeField] SpawnPoint[] spawnPoints;
         [SerializeField] Transform hq;
-        [Tooltip("Per-level wave schedule (which entrances, how many each, cadence).")]
+        [Tooltip("Per-level wave schedule (enemy counts, cadence).")]
         [SerializeField] LevelConfig levelConfig;
-        [Tooltip("Archetype used for groups that name none, and for every procedural-fallback night.")]
+        [Tooltip("Archetype used when a group names none and for every procedural-fallback night.")]
         [SerializeField] EnemyDefinition defaultDefinition;
+        [Tooltip("How close to a spawn position the NavMesh must be sampled for the enemy to appear.")]
+        [SerializeField] float navSampleRadius = 4f;
 
         /// <summary>Enemies from the current wave still alive.</summary>
         public int AliveCount { get; private set; }
         /// <summary>True once every enemy in the current wave has been spawned.</summary>
         public bool SpawningComplete { get; private set; } = true;
 
+        AttackDirectionSelector _selector;
         Coroutine _spawn;
-        // Reused across waves so round-robin interleaving allocates nothing per spawn. The two lists
-        // run in lockstep: _order[i] is the entrance, _archetypes[i] the definition to spawn there.
-        readonly List<SpawnPoint> _order = new List<SpawnPoint>();
-        readonly List<EnemyDefinition> _archetypes = new List<EnemyDefinition>();
+
+        // Reused across waves; each entry is (worldPosition, archetype).
+        readonly List<Vector3> _spawnPositions = new();
+        readonly List<EnemyDefinition> _archetypes = new();
 
         void Awake()
         {
-            // Recover the schedule from Resources if the (binary) scene dropped the reference.
+            _selector = GetComponent<AttackDirectionSelector>();
+
             if (levelConfig == null) levelConfig = Resources.Load<LevelConfig>("LevelConfig");
             if (defaultDefinition == null) defaultDefinition = Resources.Load<EnemyDefinition>("Enemy_Basic");
         }
 
-        /// <summary>Spawn the wave for the given 1-based wave number.</summary>
+        /// <summary>Spawn the wave for the given 1-based wave number. Call after <see cref="AttackDirectionSelector.SelectForWave"/>.</summary>
         public void SpawnWave(int waveNumber)
         {
             StopAll();
-            if (enemyPrefab == null || spawnPoints == null || spawnPoints.Length == 0)
+            if (enemyPrefab == null)
             {
                 SpawningComplete = true;
                 return;
             }
 
             BuildSpawnOrder(waveNumber, out float interval);
-            if (_order.Count == 0)
+            if (_spawnPositions.Count == 0)
             {
                 SpawningComplete = true;
                 return;
@@ -65,35 +71,48 @@ namespace Nightwall
             _spawn = StartCoroutine(SpawnRoutine(interval));
         }
 
-        /// <summary>
-        /// Stop spawning the remainder of the current wave. Enemies already on the field live on;
-        /// the night normally ends only once they are all dead.
-        /// </summary>
+        /// <summary>Stop spawning the remainder of the current wave; enemies already alive are unaffected.</summary>
         public void StopAll()
         {
             if (_spawn != null) StopCoroutine(_spawn);
             _spawn = null;
-            _order.Clear();
+            _spawnPositions.Clear();
             _archetypes.Clear();
             SpawningComplete = true;
         }
 
+        // ── Internal ─────────────────────────────────────────────────────────
+
         /// <summary>
-        /// Fill <see cref="_order"/> with the exact sequence of entrances to spawn from this wave,
-        /// round-robin-interleaved across the active ones so the horde arrives from every active
-        /// direction at once rather than one entrance fully draining before the next begins.
+        /// Fills <see cref="_spawnPositions"/> and <see cref="_archetypes"/> with a round-robin
+        /// interleaved sequence across all active sides so the horde arrives from every direction
+        /// simultaneously rather than one side draining before the next begins.
         /// </summary>
         void BuildSpawnOrder(int waveNumber, out float interval)
         {
-            _order.Clear();
+            _spawnPositions.Clear();
             _archetypes.Clear();
-
-            // Each pending group is an (entrance, archetype, remaining) triple; round-robining across
-            // groups interleaves both directions AND archetypes so a wave arrives mixed, not sorted.
-            var points = new List<SpawnPoint>();
-            var defs = new List<EnemyDefinition>();
-            var remaining = new List<int>();
             interval = 0.6f;
+
+            IReadOnlyList<AttackSide> activeSides = _selector != null
+                ? _selector.ActiveSides
+                : System.Array.Empty<AttackSide>();
+
+            if (activeSides.Count == 0)
+            {
+                Debug.LogWarning("[WaveSpawner] No active sides selected. Did GameManager call SelectForWave first?");
+                return;
+            }
+
+            // Collect per-side (count, archetype) budget.
+            var sideCounts = new Dictionary<AttackSide, int>();
+            var sideArchetypes = new Dictionary<AttackSide, EnemyDefinition>();
+
+            foreach (AttackSide s in activeSides)
+            {
+                sideCounts[s] = 0;
+                sideArchetypes[s] = defaultDefinition;
+            }
 
             if (levelConfig != null && levelConfig.TryGetWave(waveNumber, out WaveDefinition wave))
             {
@@ -102,62 +121,72 @@ namespace Nightwall
                 {
                     foreach (SpawnGroup g in wave.groups)
                     {
-                        if (g.spawnPointIndex < 0 || g.spawnPointIndex >= spawnPoints.Length) continue;
-                        if (spawnPoints[g.spawnPointIndex] == null || g.count <= 0) continue;
-                        points.Add(spawnPoints[g.spawnPointIndex]);
-                        defs.Add(g.enemyDefinition != null ? g.enemyDefinition : defaultDefinition);
-                        remaining.Add(g.count);
+                        // Authored groups that target an inactive side are redistributed to an
+                        // active side (round-robin) so the total enemy count is always honoured.
+                        AttackSide target = activeSides.Contains(g.side) ? g.side : activeSides[0];
+                        sideCounts[target] += g.count;
+                        if (g.enemyDefinition != null) sideArchetypes[target] = g.enemyDefinition;
                     }
                 }
+
+                // If no authored groups addressed active sides, fall back to procedural count.
+                int totalAuthored = 0;
+                foreach (int c in sideCounts.Values) totalAuthored += c;
+                if (totalAuthored == 0)
+                    DistributeProceduralCount(waveNumber, activeSides, sideCounts);
             }
             else
             {
-                // Procedural fallback: spread the default archetype evenly across every entrance.
-                int valid = 0;
-                for (int i = 0; i < spawnPoints.Length; i++) if (spawnPoints[i] != null) valid++;
-                if (valid == 0) return;
-
-                int total = levelConfig != null
-                    ? levelConfig.ProceduralCount(waveNumber)
-                    : 5 + 3 * Mathf.Max(0, waveNumber - 1);
                 interval = levelConfig != null ? levelConfig.ProceduralSpawnInterval : 0.6f;
-
-                int baseEach = total / valid;
-                int extra = total % valid; // distribute the remainder to the first few entrances
-                for (int i = 0; i < spawnPoints.Length; i++)
-                {
-                    if (spawnPoints[i] == null) continue;
-                    int count = baseEach + (extra-- > 0 ? 1 : 0);
-                    if (count <= 0) continue;
-                    points.Add(spawnPoints[i]);
-                    defs.Add(defaultDefinition);
-                    remaining.Add(count);
-                }
+                DistributeProceduralCount(waveNumber, activeSides, sideCounts);
             }
 
-            // Round-robin the pending groups into a single interleaved order.
+            // Build round-robin interleaved order across all active sides.
+            var pendingSides = new List<AttackSide>(activeSides);
+            var pendingCounts = new List<int>();
+            var pendingDefs = new List<EnemyDefinition>();
+            foreach (AttackSide s in pendingSides)
+            {
+                pendingCounts.Add(sideCounts[s]);
+                pendingDefs.Add(sideArchetypes[s]);
+            }
+
             bool any = true;
             while (any)
             {
                 any = false;
-                for (int i = 0; i < points.Count; i++)
+                for (int i = 0; i < pendingSides.Count; i++)
                 {
-                    if (remaining[i] <= 0) continue;
-                    _order.Add(points[i]);
-                    _archetypes.Add(defs[i]);
-                    remaining[i]--;
+                    if (pendingCounts[i] <= 0) continue;
+                    _spawnPositions.Add(_selector != null
+                        ? _selector.GetRandomSpawnPosition(pendingSides[i])
+                        : Vector3.zero);
+                    _archetypes.Add(pendingDefs[i]);
+                    pendingCounts[i]--;
                     any = true;
                 }
             }
         }
 
+        void DistributeProceduralCount(int waveNumber, IReadOnlyList<AttackSide> activeSides,
+            Dictionary<AttackSide, int> sideCounts)
+        {
+            int total = levelConfig != null
+                ? levelConfig.ProceduralCount(waveNumber)
+                : 5 + 3 * Mathf.Max(0, waveNumber - 1);
+            int n = activeSides.Count;
+            int baseEach = total / n;
+            int extra = total % n;
+            for (int i = 0; i < n; i++)
+                sideCounts[activeSides[i]] += baseEach + (i < extra ? 1 : 0);
+        }
+
         IEnumerator SpawnRoutine(float interval)
         {
             var wait = new WaitForSeconds(interval);
-            for (int i = 0; i < _order.Count; i++)
+            for (int i = 0; i < _spawnPositions.Count; i++)
             {
-                SpawnPoint sp = _order[i];
-                Enemy enemy = sp != null ? sp.Spawn(enemyPrefab, hq, _archetypes[i]) : null;
+                Enemy enemy = SpawnEnemy(_spawnPositions[i], _archetypes[i]);
                 if (enemy != null)
                 {
                     enemy.Died += _ => AliveCount--;
@@ -166,6 +195,24 @@ namespace Nightwall
                 yield return wait;
             }
             SpawningComplete = true;
+        }
+
+        Enemy SpawnEnemy(Vector3 worldPos, EnemyDefinition definition)
+        {
+            if (enemyPrefab == null) return null;
+
+            // Snap to the nearest NavMesh position so the agent always starts on walkable ground.
+            if (NavMesh.SamplePosition(worldPos, out NavMeshHit hit, navSampleRadius, NavMesh.AllAreas))
+                worldPos = hit.position;
+
+            var go = Instantiate(enemyPrefab, worldPos, Quaternion.identity);
+            var enemy = go.GetComponent<Enemy>();
+            if (enemy != null)
+            {
+                enemy.Init(hq);
+                enemy.ApplyDefinition(definition);
+            }
+            return enemy;
         }
     }
 }

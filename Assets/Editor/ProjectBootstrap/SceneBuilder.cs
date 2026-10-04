@@ -331,22 +331,33 @@ namespace ProjectBootstrap
             }
 
             // Game systems (no SelectionManager — the player never commands units).
+            // AttackDirectionSelector must be added before WaveSpawner (RequireComponent order).
             var systems = new GameObject("GameSystems");
-            var gameManager = systems.AddComponent<GameManager>();
+            var selector = systems.AddComponent<AttackDirectionSelector>();
             var waveSpawner = systems.AddComponent<WaveSpawner>();
+            var gameManager = systems.AddComponent<GameManager>();
             var placer = systems.AddComponent<BuildingPlacer>();
             var buildBar = systems.AddComponent<BuildBar>();
             systems.AddComponent<DevHud>();
 
+            // Configure AttackDirectionSelector difficulty curves.
+            // Min active sides: 1 all the way through (even late waves can be 1-side).
+            // Max active sides: ramps from 1 at wave 1 to 4 at wave 8+.
+            SetAnimCurve(selector, "minSidesCurve",
+                new Keyframe[] { new Keyframe(1, 1), new Keyframe(10, 1) });
+            SetAnimCurve(selector, "maxSidesCurve",
+                new Keyframe[] { new Keyframe(1, 1), new Keyframe(4, 2), new Keyframe(7, 3), new Keyframe(10, 4) });
+            SetObject(selector, "map", map);
+
             // ----- Wire references via SerializedObject (robust for private [SerializeField]) -----
             SetObject(gameManager, "hq", hqComp);
             SetObject(gameManager, "waveSpawner", waveSpawner);
+            SetObject(gameManager, "attackDirectionSelector", selector);
 
             SetObject(waveSpawner, "enemyPrefab", enemyPrefab);
             SetObject(waveSpawner, "hq", hq.transform);
-            SetArray(waveSpawner, "spawnPoints", spawns);
             SetObject(waveSpawner, "defaultDefinition", _basicDef);
-            SetObject(waveSpawner, "levelConfig", MakeLevelConfig(spawns.Length));
+            SetObject(waveSpawner, "levelConfig", MakeLevelConfig());
 
             SetArray(placer, "buildables",
                 new Object[] { wallPrefab, reinforcedPrefab, gatePrefab, trapPrefab });
@@ -498,10 +509,11 @@ namespace ProjectBootstrap
 
         /// <summary>
         /// Author a handful of escalating nights, then leave the rest to the procedural fallback.
-        /// Each inner tuple is (spawnPointIndex, count); indices match the perimeter order built
-        /// above (0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW).
+        /// Groups use <see cref="AttackSide"/> rather than spawn-point indices; the
+        /// <see cref="AttackDirectionSelector"/> may override which sides are actually active at
+        /// runtime, but the authored counts and archetypes are always honoured.
         /// </summary>
-        static LevelConfig MakeLevelConfig(int spawnCount)
+        static LevelConfig MakeLevelConfig()
         {
             var cfg = AssetDatabase.LoadAssetAtPath<LevelConfig>(LevelConfigPath);
             if (cfg == null)
@@ -510,18 +522,17 @@ namespace ProjectBootstrap
                 AssetDatabase.CreateAsset(cfg, LevelConfigPath);
             }
 
-            // (interval, [(index, count, archetype), ...]) per authored night. Archetypes are
-            // introduced one at a time so each night teaches a new threat.
-            var waves = new (float interval, (int idx, int count, EnemyDefinition def)[] groups)[]
+            // (interval, [(side, count, archetype), ...]) per authored night.
+            var waves = new (float interval, (AttackSide side, int count, EnemyDefinition def)[] groups)[]
             {
-                // night 1: a single entrance of plain Basics.
-                (0.60f, new[] { (0, 6, _basicDef) }),
-                // night 2: N + S pincer; Runners rush one flank while Basics press the other.
-                (0.55f, new[] { (0, 5, _basicDef), (4, 6, _runnerDef) }),
-                // night 3: three edges — a Brute arrives to break walls, backed by Basics/Runners.
-                (0.50f, new[] { (0, 5, _basicDef), (2, 6, _runnerDef), (6, 2, _bruteDef) }),
-                // night 4: all four edges, every archetype, including a Swarm flood from the south.
-                (0.40f, new[] { (0, 5, _basicDef), (2, 8, _runnerDef), (4, 16, _swarmDef), (6, 3, _bruteDef) }),
+                // night 1: single-side, plain Basics.
+                (0.60f, new[] { (AttackSide.North, 6, _basicDef) }),
+                // night 2: two-side pincer.
+                (0.55f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.South, 6, _runnerDef) }),
+                // night 3: three edges — Brute arrives to crack walls.
+                (0.50f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.East, 6, _runnerDef), (AttackSide.West, 2, _bruteDef) }),
+                // night 4: all four edges, every archetype.
+                (0.40f, new[] { (AttackSide.North, 5, _basicDef), (AttackSide.East, 8, _runnerDef), (AttackSide.South, 16, _swarmDef), (AttackSide.West, 3, _bruteDef) }),
             };
 
             var so = new SerializedObject(cfg);
@@ -537,7 +548,7 @@ namespace ProjectBootstrap
                 for (int g = 0; g < groups.Length; g++)
                 {
                     var ep = gp.GetArrayElementAtIndex(g);
-                    ep.FindPropertyRelative("spawnPointIndex").intValue = Mathf.Clamp(groups[g].idx, 0, spawnCount - 1);
+                    ep.FindPropertyRelative("side").enumValueIndex = (int)groups[g].side;
                     ep.FindPropertyRelative("count").intValue = groups[g].count;
                     ep.FindPropertyRelative("enemyDefinition").objectReferenceValue = groups[g].def;
                 }
@@ -642,6 +653,13 @@ namespace ProjectBootstrap
             p.arraySize = values.Length;
             for (int i = 0; i < values.Length; i++)
                 p.GetArrayElementAtIndex(i).objectReferenceValue = values[i];
+            so.ApplyModifiedProperties();
+        }
+
+        static void SetAnimCurve(Object comp, string prop, Keyframe[] keys)
+        {
+            var so = new SerializedObject(comp);
+            so.FindProperty(prop).animationCurveValue = new AnimationCurve(keys);
             so.ApplyModifiedProperties();
         }
     }
