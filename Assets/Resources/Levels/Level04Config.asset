@@ -1,0 +1,205 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9286f429219a461b9322431ffda053e3, type: 3}
+  m_Name: Level04Config
+  m_EditorClassIdentifier: 
+  waves:
+  - spawnInterval: 0.6
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 5
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 6
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 2
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+  - spawnInterval: 0.55
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 6
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 8
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 2
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 10
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.5
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 7
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 10
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 3
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 14
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.48
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 8
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 12
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 4
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 18
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.45
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 10
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 14
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 5
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 22
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.43
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 12
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 16
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 6
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 24
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.4
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 14
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 18
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 7
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 26
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.38
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 16
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 20
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 8
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 28
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.36
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 18
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 22
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 9
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 30
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  - spawnInterval: 0.34
+    groupDelay: 0
+    difficultyModifier:
+      healthMultiplier: 0
+      speedMultiplier: 0
+      damageMultiplier: 0
+    groups:
+    - side: 0
+      count: 20
+      enemyDefinition: {fileID: 11400000, guid: d6b7a4762b8754f9b84b3948f0a7e4ef, type: 2}
+    - side: 2
+      count: 24
+      enemyDefinition: {fileID: 11400000, guid: 46288571e74fe4e31bf1acd22cefb2d4, type: 2}
+    - side: 1
+      count: 10
+      enemyDefinition: {fileID: 11400000, guid: 5dbbea09128f34b8bb355871f20d5d73, type: 2}
+    - side: 3
+      count: 32
+      enemyDefinition: {fileID: 11400000, guid: f7104b98986c44daba3ac419e0438f72, type: 2}
+  proceduralBaseCount: 0
+  proceduralCountPerWave: 0
+  proceduralSpawnInterval: 0.35

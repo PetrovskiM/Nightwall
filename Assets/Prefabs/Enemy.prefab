@@ -16,7 +16,9 @@ GameObject:
   - component: {fileID: 4374291504891840234}
   - component: {fileID: 4735993315566246815}
   - component: {fileID: 4996342513722722174}
+  - component: {fileID: 6534801176352864028}
   - component: {fileID: 918098355163796316}
+  - component: {fileID: 7974176976457452103}
   m_Layer: 0
   m_Name: Enemy
   m_TagString: Untagged
@@ -190,6 +192,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   moveSpeed: 3.5
+--- !u!114 &6534801176352864028
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7197097058034847139}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 343e31f5f092a49abbdf909544c60d01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  duration: 0.18
+  squash: 0.25
 --- !u!114 &918098355163796316
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -203,11 +219,24 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   hqAttackRange: 3
-  hqDamage: 10
-  breachRange: 2.5
-  breachDamage: 15
-  attackInterval: 1
+  hqDamagePerSecond: 10
+  attackRange: 2.5
+  wallDamagePerSecond: 15
+  attackCooldown: 1
   structureMask:
     serializedVersion: 2
     m_Bits: 4294967295
   repathInterval: 0.5
+--- !u!114 &7974176976457452103
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7197097058034847139}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7e25e9c6a02234e0789799723e03ffc2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  flashDuration: 0.05

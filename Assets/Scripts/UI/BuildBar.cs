@@ -18,11 +18,20 @@ namespace Nightwall
 
         GUIStyle _style;
 
+        void OnDisable()
+        {
+            if (InputService.Instance != null) InputService.Instance.ClearUiBlocker(this);
+        }
+
         void OnGUI()
         {
             if (placer == null) return;
             // Build is a daytime activity; hide the bar when the player can't build.
-            if (GameManager.Instance != null && !GameManager.Instance.CanBuild) return;
+            if (GameManager.Instance != null && !GameManager.Instance.CanBuild)
+            {
+                if (InputService.Instance != null) InputService.Instance.ClearUiBlocker(this);
+                return;
+            }
 
             var list = placer.Buildables;
             if (list == null || list.Count == 0) return;
@@ -55,6 +64,11 @@ namespace Nightwall
                 GUI.backgroundColor = prev;
                 x += buttonWidth + 8f;
             }
+
+            // Tell the input abstraction the bar's footprint so taps on it never build the world.
+            float startX = safe.x + margin.x;
+            var barRect = new Rect(startX, y, x - startX - 8f, buttonHeight);
+            if (InputService.Instance != null) InputService.Instance.SetUiBlockerGui(this, barRect);
         }
     }
 }

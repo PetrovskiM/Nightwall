@@ -6,15 +6,18 @@ using UnityEngine.InputSystem;
 namespace Nightwall
 {
     /// <summary>
-    /// Wall placement and removal.
+    /// Wall placement and removal. All pointer input is read through <see cref="InputService"/>, so
+    /// this class is identical on phone, tablet and desktop and never touches a mouse/touch API.
     ///
-    /// Placement: B toggles build mode, 1/2 pick structure, R rotates, Esc cancels.
-    ///   Mouse: left-click places; ghost follows cursor with green (valid) / red (invalid) tint.
-    ///   Touch: single tap places; two-finger tap cancels build mode.
+    /// Placement: B toggles build mode, 1-4 pick structure, R rotates, Esc cancels.
+    ///   Tap (or left-click)      → place on the targeted cell; the ghost + cell highlight show
+    ///                              green (valid) / red (invalid) feedback as it tracks the pointer.
+    ///   Hold the pointer down    → paint walls across empty cells (desktop convenience).
     ///
-    /// Removal: right-click (mouse) or long-press (touch, future) on any placed building.
-    ///   Works regardless of build mode.
+    /// Removal / contextual: long-press (touch) or right-click (desktop) on a placed building removes
+    ///   it; on a gate (outside build mode) it toggles the gate. Works regardless of build mode.
     ///
+    /// Placement is suppressed while a two-finger camera gesture is active, so panning never builds.
     /// UI buttons call <see cref="ActivateForIndex"/> directly.
     /// </summary>
     public class BuildingPlacer : MonoBehaviour
@@ -23,10 +26,15 @@ namespace Nightwall
         [SerializeField] LayerMask groundMask = ~0;
         [SerializeField] LayerMask buildingMask;
         [SerializeField] Material ghostMaterial;
+        [SerializeField] CellHighlighter cellHighlighter;
         [SerializeField] Color validTint   = new Color(0.2f, 0.9f, 0.2f, 0.5f);
         [SerializeField] Color invalidTint = new Color(1f,   0.3f, 0.3f, 0.5f);
 
         public bool IsActive { get; private set; }
+
+        /// <summary>Raised whenever build mode turns on (true) or off (false). Lets structures react
+        /// (e.g. switch to an x-ray look so the player can see the cells behind them).</summary>
+        public event System.Action<bool> BuildModeChanged;
 
         /// <summary>The prefabs this placer can build, in hotkey/UI order. Read-only view for UI.</summary>
         public IReadOnlyList<GameObject> Buildables => buildables;
@@ -41,10 +49,6 @@ namespace Nightwall
         Camera _cam;
         bool _validPlacement;
 
-        // Touch tracking: ignore taps that were part of a pan drag.
-        Vector2 _touchDownPos;
-        const float TapMoveTolerance = 20f;
-
         readonly Collider[] _enemyHits = new Collider[8];
 
         void Awake() => _cam = Camera.main;
@@ -52,89 +56,74 @@ namespace Nightwall
         void Update()
         {
             if (_cam == null) _cam = Camera.main;
+            InputService input = InputService.Instance;
+            if (input == null) return;
 
             // Building is a daytime activity. When night falls (or the run ends) disable all
             // placement/removal input and cancel any build mode left open from the day.
             if (GameManager.Instance != null && !GameManager.Instance.CanBuild)
             {
-                if (IsActive) { IsActive = false; ClearGhost(); }
+                if (IsActive)
+                {
+                    IsActive = false;
+                    ClearGhost();
+                    if (cellHighlighter != null) cellHighlighter.Hide();
+                    BuildModeChanged?.Invoke(false);
+                }
                 return;
             }
 
-            HandleRemoveInput();
+            // Long-press / right-click removes a structure anywhere, regardless of build mode.
+            if (input.Hold) TryRemove(input.HoldPosition);
 
-            Keyboard kb = Keyboard.current;
-            if (kb != null && kb.bKey.wasPressedThisFrame) Toggle();
-            if (!IsActive) { HandleGateInput(); return; }
+            HandleKeyboardHotkeys();
 
-            if (kb != null)
+            if (!IsActive)
             {
-                if (kb.digit1Key.wasPressedThisFrame) SelectIndex(0);
-                if (kb.digit2Key.wasPressedThisFrame) SelectIndex(1);
-                if (kb.digit3Key.wasPressedThisFrame) SelectIndex(2);
-                if (kb.digit4Key.wasPressedThisFrame) SelectIndex(3);
-                if (kb.rKey.wasPressedThisFrame) _yaw += 90f;
-                if (kb.escapeKey.wasPressedThisFrame) { Toggle(); return; }
+                if (cellHighlighter != null) cellHighlighter.Hide();
+                HandleGateInput(input);
+                return;
             }
 
-            if (Touchscreen.current != null && Touchscreen.current.touches.Count > 0)
-            {
-                HandleTouch();
-                if (_ghost != null) UpdateGhostAtPosition(ScreenToGroundPoint(
-                    Touchscreen.current.touches[0].position.ReadValue()));
-            }
-            else
-            {
-                UpdateGhost();
-                // Held button paints across cells: after a cell is placed it becomes occupied,
-                // so _validPlacement flips false there and only new empty cells get walls.
-                if (_ghost != null && _validPlacement &&
-                    Mouse.current != null && Mouse.current.leftButton.isPressed)
-                    Place();
-            }
+            // Track the ghost + highlight to the pointer's cell every frame.
+            if (input.HasPointer)
+                UpdateGhostAtPosition(ScreenToGroundPoint(input.PointerPosition));
+
+            // Never build while the player is mid-gesture (two-finger pan/pinch/twist).
+            if (input.IsGesturing) return;
+
+            // A committed tap places once; a held pointer paints across empty cells (occupied cells
+            // flip _validPlacement false, so only new cells receive walls).
+            if (_ghost != null && _validPlacement && (input.Tap || input.PrimaryHeld))
+                Place();
         }
 
         // ── Input handlers ────────────────────────────────────────────────────
 
-        void HandleRemoveInput()
+        void HandleKeyboardHotkeys()
         {
-            if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
-                TryRemove(Mouse.current.position.ReadValue());
+            Keyboard kb = Keyboard.current;
+            if (kb == null) return;
+            if (kb.bKey.wasPressedThisFrame) Toggle();
+            if (!IsActive) return;
+            if (kb.digit1Key.wasPressedThisFrame) SelectIndex(0);
+            if (kb.digit2Key.wasPressedThisFrame) SelectIndex(1);
+            if (kb.digit3Key.wasPressedThisFrame) SelectIndex(2);
+            if (kb.digit4Key.wasPressedThisFrame) SelectIndex(3);
+            if (kb.rKey.wasPressedThisFrame) _yaw += 90f;
+            if (kb.escapeKey.wasPressedThisFrame) Toggle();
         }
 
         /// <summary>
-        /// Left-click on a placed gate (while not in build mode) opens or closes it. Lets the player
+        /// A tap on a placed gate (while not in build mode) opens or closes it. Lets the player
         /// manage gates during the day without entering placement mode.
         /// </summary>
-        void HandleGateInput()
+        void HandleGateInput(InputService input)
         {
-            if (_cam == null) return;
-            if (Mouse.current == null || !Mouse.current.leftButton.wasPressedThisFrame) return;
-
-            Ray ray = _cam.ScreenPointToRay(Mouse.current.position.ReadValue());
+            if (_cam == null || !input.Tap) return;
+            Ray ray = _cam.ScreenPointToRay(input.TapPosition);
             if (Physics.Raycast(ray, out RaycastHit hit, 500f, buildingMask))
                 hit.collider.GetComponentInParent<Gate>()?.Toggle();
-        }
-
-        void HandleTouch()
-        {
-            var touches = Touchscreen.current.touches;
-            int activeCount = 0;
-            for (int i = 0; i < touches.Count; i++)
-                if (touches[i].isInProgress) activeCount++;
-
-            if (activeCount >= 2) { Toggle(); return; }
-
-            var t0 = touches[0];
-            var phase = t0.phase.ReadValue();
-            if (phase == UnityEngine.InputSystem.TouchPhase.Began)
-                _touchDownPos = t0.position.ReadValue();
-            else if (phase == UnityEngine.InputSystem.TouchPhase.Ended)
-            {
-                Vector2 up = t0.position.ReadValue();
-                if (Vector2.Distance(up, _touchDownPos) < TapMoveTolerance && _ghost != null && _validPlacement)
-                    Place();
-            }
         }
 
         // ── Public API ────────────────────────────────────────────────────────
@@ -164,6 +153,7 @@ namespace Nightwall
             IsActive = !IsActive;
             if (IsActive) BuildGhost();
             else ClearGhost();
+            BuildModeChanged?.Invoke(IsActive);
         }
 
         // ── Placement ─────────────────────────────────────────────────────────
@@ -200,18 +190,19 @@ namespace Nightwall
             if (_ghostInstance != null) Destroy(_ghostInstance);
             _ghost = null;
             _ghostInstance = null;
-        }
-
-        void UpdateGhost()
-        {
-            if (_ghost == null || Mouse.current == null) return;
-            Vector3? worldPos = ScreenToGroundPoint(Mouse.current.position.ReadValue());
-            if (worldPos.HasValue) UpdateGhostAtPosition(worldPos);
+            if (cellHighlighter != null) cellHighlighter.Hide();
         }
 
         void UpdateGhostAtPosition(Vector3? worldPos)
         {
-            if (_ghost == null || !worldPos.HasValue) return;
+            if (_ghost == null) return;
+            if (!worldPos.HasValue)
+            {
+                // Pointer isn't over the ground (e.g. off the map) — nothing to target.
+                if (cellHighlighter != null) cellHighlighter.Hide();
+                _validPlacement = false;
+                return;
+            }
 
             GridSystem grid = GridSystem.Instance;
             Vector2Int footprint = CurrentFootprint();
@@ -227,8 +218,16 @@ namespace Nightwall
                 _ghost.transform.position = worldPos.Value;
                 _validPlacement = true;
             }
+            // Can't afford the selected structure → show the invalid (red) feedback.
+            if (MaterialBank.Instance != null && !MaterialBank.Instance.CanAfford(CurrentCost()))
+                _validPlacement = false;
+
             _ghost.transform.rotation = Quaternion.Euler(0f, _yaw, 0f);
             Tint(_validPlacement ? validTint : invalidTint);
+
+            if (cellHighlighter != null)
+                cellHighlighter.Show(_ghost.transform.position, footprint,
+                    grid != null ? grid.CellSize : 1f, _validPlacement);
         }
 
         void Place()
@@ -242,6 +241,15 @@ namespace Nightwall
                 Vector2Int cell = grid.WorldToCell(_ghost.transform.position);
                 if (!grid.CanPlace(cell, footprint)) return;        // guard against a stale valid flag
                 if (CellHasEnemy(_ghost.transform.position)) return; // never trap/overlap an enemy
+            }
+
+            // Charge for the structure once the spot is confirmed buildable; bail if unaffordable
+            // (the ghost already shows red in that case).
+            if (MaterialBank.Instance != null && !MaterialBank.Instance.TrySpend(CurrentCost())) return;
+
+            if (grid != null)
+            {
+                Vector2Int cell = grid.WorldToCell(_ghost.transform.position);
                 grid.Occupy(cell, footprint);                       // claim the cell now, no 1-frame gap
             }
 
@@ -278,6 +286,14 @@ namespace Nightwall
         {
             var b = buildables[_index] != null ? buildables[_index].GetComponent<Buildable>() : null;
             return b != null ? b.Footprint : new Vector2Int(1, 1);
+        }
+
+        /// <summary>Material cost of the currently selected structure (0 when it carries no metadata).</summary>
+        int CurrentCost()
+        {
+            if (buildables.Count == 0 || buildables[_index] == null) return 0;
+            var s = buildables[_index].GetComponent<DefensiveStructure>();
+            return s != null ? s.Cost : 0;
         }
 
         /// <summary>True when a live enemy is standing on the target cell — can't build on it.</summary>

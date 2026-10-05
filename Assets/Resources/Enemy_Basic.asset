@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a3c922f6650b4eea89ec1d9421c3c1b8, type: 3}
+  m_Name: Enemy_Basic
+  m_EditorClassIdentifier: 
+  displayName: Basic
+  maxHealth: 40
+  moveSpeed: 3.5
+  wallDamagePerSecond: 15
+  attackCooldown: 1
+  size: 1
+  visualPrefab: {fileID: 0}
+  bodyColor: {r: 0.9, g: 0.25, b: 0.25, a: 1}
+  navCostOverrides: []
+  spawnCost: 1

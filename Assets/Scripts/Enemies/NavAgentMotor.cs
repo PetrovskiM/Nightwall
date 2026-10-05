@@ -15,7 +15,8 @@ namespace Nightwall
 
         NavMeshAgent _agent;
         // Reused across filtered path requests to avoid allocating a new NavMeshPath each call.
-        readonly NavMeshPath _filteredPath = new NavMeshPath();
+        // Constructed in Awake: a NavMeshPath can't be created from a field initializer / constructor.
+        NavMeshPath _filteredPath;
 
         public float MoveSpeed
         {
@@ -29,6 +30,7 @@ namespace Nightwall
         void Awake()
         {
             _agent = GetComponent<NavMeshAgent>();
+            _filteredPath = new NavMeshPath();
             _agent.speed = moveSpeed;
             _agent.updateRotation = true;
             _agent.updateUpAxis = false;

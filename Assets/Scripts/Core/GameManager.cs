@@ -124,6 +124,17 @@ namespace Nightwall
             dawnDuration     = level.DawnDuration;
         }
 
+        /// <summary>
+        /// Ends the Day phase immediately so the player can summon the horde on demand (the "Start
+        /// Night" button). The run loop is counting down <see cref="PhaseTimeRemaining"/>, so zeroing
+        /// it drops into Night next frame. No-op outside the Day phase.
+        /// </summary>
+        public void StartNightEarly()
+        {
+            if (State != GameState.Day) return;
+            PhaseTimeRemaining = 0f;
+        }
+
         /// <summary>Called by the <see cref="Hq"/> when its <see cref="Health"/> reaches zero.</summary>
         public void OnHqDestroyed()
         {
